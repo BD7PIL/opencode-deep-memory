@@ -31,12 +31,9 @@ import { createMemoryTools } from "./tools/index.js";
 import { createCompactingHandler } from "./hooks/compacting.js";
 import { runEnrichment } from "./extract/enrich.js";
 
-const globalCache = globalThis as unknown as { __deepMemoryCachedHooks?: Hooks };
-
 export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
-  if (globalCache.__deepMemoryCachedHooks) {
-    return globalCache.__deepMemoryCachedHooks;
-  }
+  const cached = (globalThis as Record<string, unknown>)["__deepMemoryCachedHooks"] as Hooks | undefined;
+  if (cached) return cached;
 
   const logger = createLogger();
   const state = createPluginState();
@@ -238,7 +235,7 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
     }),
   };
 
-  globalCache.__deepMemoryCachedHooks = hooks;
+  (globalThis as Record<string, unknown>)["__deepMemoryCachedHooks"] = hooks;
   return hooks;
 };
 
