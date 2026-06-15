@@ -80,6 +80,8 @@ export class PluginState {
     sessionID: string,
     info: { budgetTokens: number; projectHash: string },
   ): void {
+    const existing = this._pendingResumes.get(sessionID);
+    if (existing && Date.now() - existing.setAt < 5000) return;
     this._pendingResumes.set(sessionID, {
       budgetTokens: info.budgetTokens,
       projectHash: info.projectHash,

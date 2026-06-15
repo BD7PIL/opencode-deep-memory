@@ -28,7 +28,7 @@ function resolveLogLevel(env: NodeJS.ProcessEnv): LogLevel | null {
   if (!v) return null;
   if (v === "trace") return "trace";
   if (v === "0" || v === "false") return null;
-  return "info"; // any other truthy value → info
+  return "debug";
 }
 
 function resolveLogFile(env: NodeJS.ProcessEnv): string {
