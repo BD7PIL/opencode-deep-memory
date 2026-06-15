@@ -141,4 +141,55 @@ describe("allocateAndRender", () => {
       expect([3, 4]).toContain(allocated[1].tier);
     }
   });
+
+  it("STRESS: 50+ results with varying relevance → at least 3 distinct tiers used", () => {
+    const results: SearchResultLike[] = [];
+    for (let i = 0; i < 60; i++) {
+      const score = Math.exp(-i / 10) * 15 + Math.random() * 2;
+      const heading = i < 10 ? "constraint rule" : i < 25 ? "decision" : i < 40 ? "fact" : "note";
+      const snippet = `Entry ${i}: `.padEnd(50 + (i % 3) * 30, "x") + ` content about topic ${i % 5}`;
+      results.push(makeResult(score, heading, snippet));
+    }
+
+    const allocated = allocateAndRender(results, { budget: 200 });
+
+    expect(allocated.length).toBeGreaterThan(1);
+    const tiers = [...new Set(allocated.map((a) => a.tier))];
+    expect(tiers.length).toBeGreaterThanOrEqual(2);
+
+    const totalTokens = allocated.reduce((s, a) => s + a.tokens, 0);
+    expect(totalTokens).toBeLessThanOrEqual(210);
+
+    const highRelevance = allocated.filter((a) => a.tier <= 2);
+    const lowRelevance = allocated.filter((a) => a.tier >= 3);
+    expect(highRelevance.length).toBeGreaterThan(0);
+    expect(lowRelevance.length).toBeGreaterThan(0);
+  });
+
+  it("STRESS: tight budget forces tier downgrade for most entries", () => {
+    const results: SearchResultLike[] = Array.from({ length: 40 }, (_, i) =>
+      makeResult(10 - i * 0.2, i < 15 ? "constraint" : "note", `long content ${i}: `.padEnd(80, "."))
+    );
+
+    const allocated = allocateAndRender(results, { budget: 55 });
+
+    expect(allocated.length).toBeGreaterThan(0);
+    const totalTokens = allocated.reduce((s, a) => s + a.tokens, 0);
+    expect(totalTokens).toBeLessThanOrEqual(65);
+
+    const highTiers = allocated.filter((a) => a.tier <= 2).length;
+    expect(highTiers).toBeLessThanOrEqual(2);
+  });
+
+  it("STRESS: large budget shows most entries at high tier", () => {
+    const results: SearchResultLike[] = Array.from({ length: 20 }, (_, i) =>
+      makeResult(12 - i * 0.3, i < 10 ? "constraint" : "decision", `content ${i}`)
+    );
+
+    const allocated = allocateAndRender(results, { budget: 3000 });
+
+    expect(allocated.length).toBe(20);
+    const tier1Count = allocated.filter((a) => a.tier === 1).length;
+    expect(tier1Count).toBeGreaterThanOrEqual(10);
+  });
 });
