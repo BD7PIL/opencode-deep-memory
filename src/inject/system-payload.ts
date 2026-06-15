@@ -79,7 +79,7 @@ export async function composeSystemPayload(opts: ComposeSystemPayloadOpts): Prom
   let searchMemory = "";
   if (userQuery && searchService && searchBudget > 0) {
     try {
-      const results = await searchService.search(userQuery, { scope: "all", limit: 5 });
+      const results = await searchService.search(userQuery, { scope: "all", limit: 5, applyDecay: true });
       if (results.length > 0) {
         searchMemory = results.map((r) => {
           const scopeTag = r.scope === "global" ? "[global]" : r.scope === "session" ? "[session]" : "";

@@ -79,7 +79,7 @@ export class SearchService {
    */
   async search(
     query: string,
-    opts?: { scope?: Scope | "all"; limit?: number },
+    opts?: { scope?: Scope | "all"; limit?: number; applyDecay?: boolean },
   ): Promise<SearchResult[]> {
     await this.ensureIndex();
 
@@ -99,6 +99,7 @@ export class SearchService {
 
     const rawResults = this.index.search(allQueryTokens, {
       limit: limit * 3, // Over-fetch for scope filtering
+      applyDecay: opts?.applyDecay,
     });
 
     const results: SearchResult[] = [];
