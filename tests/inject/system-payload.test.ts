@@ -1,6 +1,3 @@
-/**
- * Tests for system-payload — composeSystemPayload.
- */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
@@ -20,7 +17,6 @@ describe("composeSystemPayload", () => {
   beforeEach(() => {
     tmpDir = createTmpDir();
     projectPath = tmpDir;
-    // Set env to use tmpDir as data root
     process.env["DEEP_MEMORY_DATA"] = path.join(tmpDir, "data");
   });
 
@@ -41,117 +37,98 @@ describe("composeSystemPayload", () => {
     fs.writeFileSync(cpPath, content, "utf8");
   }
 
-  it("emits only tool-hint for tool-subagent tier", async () => {
+  it("emits only stable tool-hint for tool-subagent tier", async () => {
     const state = createPluginState();
     state.recordAgent("sess-1", "explore");
 
-    const result = await composeSystemPayload({
-      state,
-      sessionID: "sess-1",
-      projectPath,
-      mode: "normal",
+    const { stable, volatile } = await composeSystemPayload({
+      state, sessionID: "sess-1", projectPath, mode: "normal",
     });
 
-    expect(result).toContain("<deep-memory>");
-    expect(result).toContain("<tool-hint>");
-    expect(result).toContain("memory_search");
-    expect(result).not.toContain("<persistent-memory>");
-    expect(result).not.toContain("<last-checkpoint>");
-    expect(result).toContain("</deep-memory>");
+    expect(stable).toContain("<deep-memory-stable>");
+    expect(stable).toContain("<tool-hint>");
+    expect(stable).toContain("memory_search");
+    expect(stable).toContain("</deep-memory-stable>");
+    expect(volatile).toBe("");
   });
 
-  it("emits persistent-memory with '(empty)' when no MEMORY.md exists", async () => {
+  it("emits stable with empty constraints when no MEMORY.md", async () => {
     const state = createPluginState();
     state.recordAgent("sess-1", "build");
 
-    const result = await composeSystemPayload({
-      state,
-      sessionID: "sess-1",
-      projectPath,
-      mode: "normal",
+    const { stable, volatile } = await composeSystemPayload({
+      state, sessionID: "sess-1", projectPath, mode: "normal",
     });
 
-    expect(result).toContain("<deep-memory>");
-    expect(result).toContain("<tool-hint>");
-    expect(result).toContain("<persistent-memory>");
-    expect(result).toContain("(empty — no persistent memory yet)");
-    expect(result).toContain("</persistent-memory>");
-    expect(result).toContain("</deep-memory>");
+    expect(stable).toContain("<deep-memory-stable>");
+    expect(stable).toContain("<tool-hint>");
+    expect(stable).toContain("<constraints>");
+    expect(stable).toContain("(empty)");
+    expect(stable).toContain("</constraints>");
+    expect(volatile).toContain("<deep-memory-volatile>");
   });
 
-  it("emits MEMORY.md content when file exists", async () => {
+  it("emits MEMORY.md content in stable constraints", async () => {
     const state = createPluginState();
     state.recordAgent("sess-1", "build");
 
     setupMemoryFile("## Rules\nAlways use TypeScript.\n## Decisions\nUse vitest.\n");
 
-    const result = await composeSystemPayload({
-      state,
-      sessionID: "sess-1",
-      projectPath,
-      mode: "normal",
+    const { stable } = await composeSystemPayload({
+      state, sessionID: "sess-1", projectPath, mode: "normal",
     });
 
-    expect(result).toContain("<persistent-memory>");
-    expect(result).toContain("Always use TypeScript.");
-    expect(result).toContain("</persistent-memory>");
+    expect(stable).toContain("<constraints>");
+    expect(stable).toContain("Always use TypeScript.");
+    expect(stable).toContain("</constraints>");
   });
 
-  it("emits checkpoint when file exists and budget allows", async () => {
+  it("emits checkpoint in volatile when file exists", async () => {
     const state = createPluginState();
     state.recordAgent("sess-1", "build");
 
     setupMemoryFile("## Rules\nUse TS.");
-    setupCheckpointFile(
-      "## User Intent\nBuild auth system.\n## Decisions\nUse JWT.\n",
-    );
+    setupCheckpointFile("## User Intent\nBuild auth system.\n## Decisions\nUse JWT.\n");
 
-    const result = await composeSystemPayload({
-      state,
-      sessionID: "sess-1",
-      projectPath,
-      mode: "normal",
+    const { volatile } = await composeSystemPayload({
+      state, sessionID: "sess-1", projectPath, mode: "normal",
     });
 
-    expect(result).toContain("<last-checkpoint>");
-    expect(result).toContain("Build auth system.");
-    expect(result).toContain("</last-checkpoint>");
+    expect(volatile).toContain("<last-checkpoint>");
+    expect(volatile).toContain("Build auth system.");
+    expect(volatile).toContain("</last-checkpoint>");
   });
 
-  it("uses post-resume budget when sessionID is undefined (defaults to main tier)", async () => {
+  it("works with post-resume mode for main tier", async () => {
     const state = createPluginState();
 
-    const result = await composeSystemPayload({
-      state,
-      sessionID: undefined,
-      projectPath,
-      mode: "post-resume",
+    const { stable, volatile } = await composeSystemPayload({
+      state, sessionID: undefined, projectPath, mode: "post-resume",
     });
 
-    // With undefined sessionID, agentOf returns undefined → main tier → post-resume = 3000t
-    expect(result).toContain("<deep-memory>");
-    expect(result).toContain("<persistent-memory>");
+    expect(stable).toContain("<deep-memory-stable>");
+    expect(stable).toContain("<constraints>");
+    expect(volatile).toContain("<deep-memory-volatile>");
   });
 
-  it("produces correct structure with all XML tags for main tier with files", async () => {
+  it("produces correct m[0]/m[1] structure for main tier with files", async () => {
     const state = createPluginState();
     state.recordAgent("sess-1", "sisyphus");
 
     setupMemoryFile("## Rules\nBe concise.");
     setupCheckpointFile("## Decisions\nUse ESM.");
 
-    const result = await composeSystemPayload({
-      state,
-      sessionID: "sess-1",
-      projectPath,
-      mode: "post-compaction",
+    const { stable, volatile } = await composeSystemPayload({
+      state, sessionID: "sess-1", projectPath, mode: "post-compaction",
     });
 
-    // Verify XML structure
-    expect(result).toMatch(/<deep-memory>/);
-    expect(result).toMatch(/<tool-hint>.*memory_search.*<\/tool-hint>/s);
-    expect(result).toMatch(/<persistent-memory>[\s\S]*<\/persistent-memory>/);
-    expect(result).toMatch(/<last-checkpoint>[\s\S]*<\/last-checkpoint>/);
-    expect(result).toMatch(/<\/deep-memory>/);
+    expect(stable).toMatch(/<deep-memory-stable>/);
+    expect(stable).toMatch(/<tool-hint>.*memory_search.*<\/tool-hint>/s);
+    expect(stable).toMatch(/<constraints>[\s\S]*<\/constraints>/);
+
+    expect(volatile).toMatch(/<deep-memory-volatile>/);
+    expect(volatile).toMatch(/<relevant>/);
+    expect(volatile).toMatch(/<last-checkpoint>[\s\S]*Use ESM[\s\S]*<\/last-checkpoint>/);
+    expect(volatile).toMatch(/<\/deep-memory-volatile>/);
   });
 });

@@ -29,6 +29,7 @@ import { handleSessionCreatedForDistill } from "./schedule/auto-distill.js";
 import { SearchService } from "./search/service.js";
 import { createMemoryTools } from "./tools/index.js";
 import { createCompactingHandler } from "./hooks/compacting.js";
+import { createMessagesTransformHandler } from "./hooks/messages-transform.js";
 import { runEnrichment } from "./extract/enrich.js";
 
 export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
@@ -233,6 +234,11 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
       projectPath,
       logger: logger.for("compacting"),
     }),
+
+    "experimental.chat.messages.transform": createMessagesTransformHandler(
+      state,
+      logger.for("messages-transform"),
+    ),
   };
 
   (globalThis as Record<string, unknown>)["__deepMemoryCachedHooks"] = hooks;

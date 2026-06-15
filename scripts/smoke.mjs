@@ -74,6 +74,7 @@ async function main() {
   check("chat.params registered", typeof hooks["chat.params"] === "function");
   check("chat.message registered", typeof hooks["chat.message"] === "function");
   check("experimental.chat.system.transform registered", typeof hooks["experimental.chat.system.transform"] === "function");
+  check("experimental.chat.messages.transform registered", typeof hooks["experimental.chat.messages.transform"] === "function");
   check("experimental.session.compacting registered", typeof hooks["experimental.session.compacting"] === "function");
   check("event registered", typeof hooks.event === "function");
   check("tool registered with 3 tools", hooks.tool && Object.keys(hooks.tool).length === 3);
@@ -109,17 +110,26 @@ async function main() {
   check("notes.md contains the user message", fs.readFileSync(notesPath, "utf8").includes("使用 ESM 模块"));
 
   console.log();
-  console.log("--- Hook: experimental.chat.system.transform ---");
+  console.log("--- Hook: experimental.chat.system.transform (m[0]/m[1]) ---");
   const sysOutput = { system: [] };
   await hooks["experimental.chat.system.transform"](
     { sessionID: "smoke-sess-1", model: { id: "test-model" } },
     sysOutput,
   );
-  check("system.transform pushes 1 fragment", sysOutput.system.length === 1);
-  check("payload starts with <deep-memory>", sysOutput.system[0].startsWith("<deep-memory>"));
-  check("payload contains <tool-hint>", sysOutput.system[0].includes("<tool-hint>"));
-  check("payload ends with </deep-memory>", sysOutput.system[0].trimEnd().endsWith("</deep-memory>"));
-  console.log(`    payload size: ${sysOutput.system[0].length} chars`);
+  check("system.transform pushes 2 fragments (m[0]+m[1])", sysOutput.system.length === 2, `got ${sysOutput.system.length}`);
+  if (sysOutput.system.length >= 2) {
+    check("m[0] contains <deep-memory-stable>", sysOutput.system[0].includes("<deep-memory-stable>"));
+    check("m[0] contains <tool-hint>", sysOutput.system[0].includes("<tool-hint>"));
+    check("m[1] contains <deep-memory-volatile>", sysOutput.system[1].includes("<deep-memory-volatile>"));
+    console.log(`    m[0] size: ${sysOutput.system[0].length} chars, m[1] size: ${sysOutput.system[1].length} chars`);
+  }
+
+  console.log();
+  console.log("--- Hook: experimental.chat.messages.transform ---");
+  const msgOutput = { messages: [] };
+  await hooks["experimental.chat.messages.transform"]({}, msgOutput);
+  check("messages.transform executes without error (empty messages)", true);
+
 
   console.log();
   console.log("--- Hook: event (session.created) ---");

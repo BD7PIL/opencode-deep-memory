@@ -42,7 +42,7 @@ export function createSystemTransformHandler(
 
     const userQuery = state.consumeLastUserText(sessionID);
 
-    const payload = await composeSystemPayload({
+    const { stable, volatile } = await composeSystemPayload({
       state,
       sessionID,
       projectPath,
@@ -52,8 +52,11 @@ export function createSystemTransformHandler(
       logger,
     });
 
-    if (payload) {
-      output.system.push(payload);
+    if (stable) {
+      output.system.push(stable);
+    }
+    if (volatile) {
+      output.system.push(volatile);
     }
 
     const agent = state.agentOf(sessionID);
@@ -63,7 +66,8 @@ export function createSystemTransformHandler(
       agent: agent ?? "(undefined)",
       tier,
       mode,
-      payloadSize: payload.length,
+      stableSize: stable.length,
+      volatileSize: volatile.length,
     });
   };
 }
