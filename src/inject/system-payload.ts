@@ -3,11 +3,17 @@
  *
  * Reads MEMORY.md and checkpoint.md via budgetedRead, then wraps them
  * in XML tags for the system prompt.
+ *
+ * Uses hybrid injection:
+ *   - Static (40% of memorySummary budget): Constraints + Rules from MEMORY.md
+ *   - Context-aware (60% of memorySummary budget): BM25 search results for user's query
  */
 
 import type { PluginState } from "../hooks/shared-state.js";
 import type { Logger } from "../shared/log.js";
 import { memoryFilePath } from "../shared/paths.js";
+import { truncateToTokenBudget } from "../shared/tokens.js";
+import type { SearchService } from "../search/service.js";
 import { classifyAgent, budgetFor } from "./agent-budget.js";
 import { budgetedRead } from "./budgeted-read.js";
 
@@ -19,6 +25,8 @@ export interface ComposeSystemPayloadOpts {
   sessionID: string | undefined;
   projectPath: string;
   mode: "normal" | "post-compaction" | "post-resume";
+  searchService?: SearchService;
+  userQuery?: string;
   logger?: Logger;
 }
 
@@ -28,14 +36,17 @@ export interface ComposeSystemPayloadOpts {
  * Flow:
  * 1. Look up agent via state.agentOf(sessionID) → classify tier
  * 2. Get budget via budgetFor(tier, mode)
- * 3. If budget.memorySummary > 0: read project MEMORY.md via budgetedRead
- * 4. If budget.checkpointSummary > 0: read project checkpoint.md via budgetedRead
- * 5. Compose final string with XML sections
+ * 3. If budget.total <= 80: tool-hint only (subagent tier)
+ * 4. Split memorySummary budget: 40% static constraints, 60% context search
+ * 5. Static: read Constraints + Rules + Decisions from MEMORY.md
+ * 6. Context-aware: BM25 search for user's current query (when available)
+ * 7. Read checkpoint.md at full checkpointSummary budget
+ * 8. Compose final string with XML sections
  *
  * If budget.total <= 80 (tool-subagent tier), only emit the <tool-hint> fragment.
  */
-export function composeSystemPayload(opts: ComposeSystemPayloadOpts): string {
-  const { state, sessionID, projectPath, mode, logger } = opts;
+export async function composeSystemPayload(opts: ComposeSystemPayloadOpts): Promise<string> {
+  const { state, sessionID, projectPath, mode, searchService, userQuery, logger } = opts;
 
   // 1. Look up agent → classify tier
   const agent = sessionID ? state.agentOf(sessionID) : undefined;
@@ -49,20 +60,40 @@ export function composeSystemPayload(opts: ComposeSystemPayloadOpts): string {
     return `<deep-memory>\n<tool-hint>${TOOL_HINT}</tool-hint>\n</deep-memory>`;
   }
 
-  // 4. Read MEMORY.md
-  let memorySummary = "";
-  if (budget.memorySummary > 0) {
+  // 4. Split memory budget: 40% static constraints, 60% context search
+  const staticBudget = Math.floor(budget.memorySummary * 0.4);
+  const searchBudget = budget.memorySummary - staticBudget;
+
+  // 5. Static: ALWAYS inject Constraints + Rules (hard rules regardless of context)
+  let staticMemory = "";
+  if (staticBudget > 0) {
     const memoryPath = memoryFilePath("project", "memory", projectPath);
-    memorySummary = budgetedRead(memoryPath, budget.memorySummary, [
-      "Rules",
+    staticMemory = budgetedRead(memoryPath, staticBudget, [
       "Constraints",
+      "Rules",
       "Decisions",
-      "Gotchas",
-      "Facts",
     ]);
   }
 
-  // 5. Read checkpoint.md
+  // 6. Context-aware: search if query available
+  let searchMemory = "";
+  if (userQuery && searchService && searchBudget > 0) {
+    try {
+      const results = await searchService.search(userQuery, { scope: "all", limit: 5 });
+      if (results.length > 0) {
+        searchMemory = results.map((r) => {
+          const scopeTag = r.scope === "global" ? "[global]" : r.scope === "session" ? "[session]" : "";
+          return `- ${scopeTag}[${r.heading}] ${r.snippet.slice(0, 150)}`;
+        }).join("\n");
+        // Truncate to searchBudget
+        searchMemory = truncateToTokenBudget(searchMemory, searchBudget);
+      }
+    } catch {
+      /* fallback: leave searchMemory empty */
+    }
+  }
+
+  // 7. Read checkpoint.md
   let checkpointSummary = "";
   if (budget.checkpointSummary > 0) {
     const checkpointPath = memoryFilePath("project", "checkpoint", projectPath);
@@ -75,8 +106,11 @@ export function composeSystemPayload(opts: ComposeSystemPayloadOpts): string {
     ]);
   }
 
-  // 6. Compose output
-  const memoryContent = memorySummary || "(empty — no persistent memory yet)";
+  // 8. Compose output — combine static + context-aware memory
+  let memoryContent = staticMemory || "(empty — no persistent memory yet)";
+  if (searchMemory) {
+    memoryContent += "\n\n## Relevant to your question\n" + searchMemory;
+  }
 
   let payload = `<deep-memory>\n<tool-hint>${TOOL_HINT}</tool-hint>\n<persistent-memory>\n${memoryContent}\n</persistent-memory>`;
 

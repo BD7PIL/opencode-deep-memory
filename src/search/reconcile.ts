@@ -250,7 +250,13 @@ export class Reconciler {
         : section.body;
       const tokens = tokenize(textToTokenize);
       if (tokens.length > 0) {
-        this.index.addDocument(docId, tokens);
+        let timestamp: Date | undefined;
+        const tsMatch = section.body.match(/\[(\d{4}-\d{2}-\d{2})\]/);
+        if (tsMatch) {
+          const parsed = new Date(tsMatch[1] + "T00:00:00Z");
+          if (!isNaN(parsed.getTime())) timestamp = parsed;
+        }
+        this.index.addDocument(docId, tokens, timestamp);
       }
     }
 

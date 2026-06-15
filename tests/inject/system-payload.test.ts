@@ -41,11 +41,11 @@ describe("composeSystemPayload", () => {
     fs.writeFileSync(cpPath, content, "utf8");
   }
 
-  it("emits only tool-hint for tool-subagent tier", () => {
+  it("emits only tool-hint for tool-subagent tier", async () => {
     const state = createPluginState();
     state.recordAgent("sess-1", "explore");
 
-    const result = composeSystemPayload({
+    const result = await composeSystemPayload({
       state,
       sessionID: "sess-1",
       projectPath,
@@ -60,11 +60,11 @@ describe("composeSystemPayload", () => {
     expect(result).toContain("</deep-memory>");
   });
 
-  it("emits persistent-memory with '(empty)' when no MEMORY.md exists", () => {
+  it("emits persistent-memory with '(empty)' when no MEMORY.md exists", async () => {
     const state = createPluginState();
     state.recordAgent("sess-1", "build");
 
-    const result = composeSystemPayload({
+    const result = await composeSystemPayload({
       state,
       sessionID: "sess-1",
       projectPath,
@@ -79,13 +79,13 @@ describe("composeSystemPayload", () => {
     expect(result).toContain("</deep-memory>");
   });
 
-  it("emits MEMORY.md content when file exists", () => {
+  it("emits MEMORY.md content when file exists", async () => {
     const state = createPluginState();
     state.recordAgent("sess-1", "build");
 
     setupMemoryFile("## Rules\nAlways use TypeScript.\n## Decisions\nUse vitest.\n");
 
-    const result = composeSystemPayload({
+    const result = await composeSystemPayload({
       state,
       sessionID: "sess-1",
       projectPath,
@@ -97,7 +97,7 @@ describe("composeSystemPayload", () => {
     expect(result).toContain("</persistent-memory>");
   });
 
-  it("emits checkpoint when file exists and budget allows", () => {
+  it("emits checkpoint when file exists and budget allows", async () => {
     const state = createPluginState();
     state.recordAgent("sess-1", "build");
 
@@ -106,7 +106,7 @@ describe("composeSystemPayload", () => {
       "## User Intent\nBuild auth system.\n## Decisions\nUse JWT.\n",
     );
 
-    const result = composeSystemPayload({
+    const result = await composeSystemPayload({
       state,
       sessionID: "sess-1",
       projectPath,
@@ -118,10 +118,10 @@ describe("composeSystemPayload", () => {
     expect(result).toContain("</last-checkpoint>");
   });
 
-  it("uses post-resume budget when sessionID is undefined (defaults to main tier)", () => {
+  it("uses post-resume budget when sessionID is undefined (defaults to main tier)", async () => {
     const state = createPluginState();
 
-    const result = composeSystemPayload({
+    const result = await composeSystemPayload({
       state,
       sessionID: undefined,
       projectPath,
@@ -133,14 +133,14 @@ describe("composeSystemPayload", () => {
     expect(result).toContain("<persistent-memory>");
   });
 
-  it("produces correct structure with all XML tags for main tier with files", () => {
+  it("produces correct structure with all XML tags for main tier with files", async () => {
     const state = createPluginState();
     state.recordAgent("sess-1", "sisyphus");
 
     setupMemoryFile("## Rules\nBe concise.");
     setupCheckpointFile("## Decisions\nUse ESM.");
 
-    const result = composeSystemPayload({
+    const result = await composeSystemPayload({
       state,
       sessionID: "sess-1",
       projectPath,

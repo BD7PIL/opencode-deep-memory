@@ -16,9 +16,11 @@ import { createHash } from "node:crypto";
 import type { Hooks } from "@opencode-ai/plugin";
 import { memoryFilePath, acquireLock } from "../shared/index.js";
 import type { Logger } from "../shared/index.js";
+import type { PluginState } from "./shared-state.js";
 
 export interface ChatMessageConfig {
   projectPath: string;
+  state: PluginState;
   logger?: Logger;
 }
 
@@ -70,7 +72,7 @@ function deduplicateEntries(content: string): string {
 export function createChatMessageHandler(
   config: ChatMessageConfig,
 ): NonNullable<Hooks["chat.message"]> {
-  const { projectPath, logger } = config;
+  const { projectPath, state, logger } = config;
 
   return async (input, output) => {
     if (output.message.role !== "user") return;
@@ -83,6 +85,8 @@ export function createChatMessageHandler(
     if (textParts.length === 0) return;
 
     const fullText = textParts.map((p) => p.text).join("");
+    state.recordLastUserText(input.sessionID, fullText);
+
     if (!matchesKeyword(fullText)) return;
 
     const truncated = truncate(fullText, MAX_NOTE_LENGTH);

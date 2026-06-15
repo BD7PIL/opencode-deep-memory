@@ -100,7 +100,7 @@ describe("memory_store tool", () => {
       "project",
       "memory",
       "Decisions",
-      "Use TypeScript",
+      expect.stringContaining("Use TypeScript"),
     );
   });
 
@@ -127,7 +127,7 @@ describe("memory_store tool", () => {
       "project",
       "memory",
       "Notes",
-      "some note",
+      expect.stringContaining("some note"),
     );
   });
 });

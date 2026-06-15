@@ -7,6 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createChatMessageHandler } from "../../src/hooks/chat-message.js";
+import { createPluginState } from "../../src/hooks/shared-state.js";
 import type { UserMessage } from "@opencode-ai/sdk";
 
 function tmpDir(): string {
@@ -93,7 +94,7 @@ describe("chat-message hook", () => {
   });
 
   it("captures Chinese keyword '记住' to notes.md", async () => {
-    const handler = createChatMessageHandler({ projectPath: tmp });
+    const handler = createChatMessageHandler({ projectPath: tmp, state: createPluginState() });
     const sid = "sess-abc12345-xyz";
     await handler(
       makeUserInput(sid),
@@ -109,7 +110,7 @@ describe("chat-message hook", () => {
   });
 
   it("captures English keyword 'remember' to notes.md", async () => {
-    const handler = createChatMessageHandler({ projectPath: tmp });
+    const handler = createChatMessageHandler({ projectPath: tmp, state: createPluginState() });
     const sid = "sess-def67890-abc";
     await handler(
       makeUserInput(sid),
@@ -123,7 +124,7 @@ describe("chat-message hook", () => {
   });
 
   it("does NOT create file when no keyword matches", async () => {
-    const handler = createChatMessageHandler({ projectPath: tmp });
+    const handler = createChatMessageHandler({ projectPath: tmp, state: createPluginState() });
     const sid = "sess-ghi11111-aaa";
     await handler(
       makeUserInput(sid),
@@ -135,7 +136,7 @@ describe("chat-message hook", () => {
   });
 
   it("does NOT capture assistant messages even with keywords", async () => {
-    const handler = createChatMessageHandler({ projectPath: tmp });
+    const handler = createChatMessageHandler({ projectPath: tmp, state: createPluginState() });
     const sid = "sess-jkk22222-bbb";
     const output = {
       message: makeAssistantMessage(sid) as unknown as UserMessage,
@@ -148,7 +149,7 @@ describe("chat-message hook", () => {
   });
 
   it("truncates messages longer than 500 chars", async () => {
-    const handler = createChatMessageHandler({ projectPath: tmp });
+    const handler = createChatMessageHandler({ projectPath: tmp, state: createPluginState() });
     const longText = "a".repeat(600) + " remember " + "b".repeat(600);
     const sid = "sess-lll33333-ccc";
     await handler(
@@ -168,7 +169,7 @@ describe("chat-message hook", () => {
   });
 
   it("appends only ONCE when multiple keywords match", async () => {
-    const handler = createChatMessageHandler({ projectPath: tmp });
+    const handler = createChatMessageHandler({ projectPath: tmp, state: createPluginState() });
     const sid = "sess-mmm44444-ddd";
     await handler(
       makeUserInput(sid),
@@ -184,7 +185,7 @@ describe("chat-message hook", () => {
   });
 
   it("two separate messages with keywords produce two appends", async () => {
-    const handler = createChatMessageHandler({ projectPath: tmp });
+    const handler = createChatMessageHandler({ projectPath: tmp, state: createPluginState() });
 
     const sid1 = "sess-nnn55555-eee";
     await handler(
@@ -209,7 +210,7 @@ describe("chat-message hook", () => {
   it("does not throw when data directory is read-only", async () => {
     fs.chmodSync(dataDir, 0o555);
 
-    const handler = createChatMessageHandler({ projectPath: tmp });
+    const handler = createChatMessageHandler({ projectPath: tmp, state: createPluginState() });
     const sid = "sess-ppp77777-ggg";
     const output = {
       message: makeUserMessage(sid),

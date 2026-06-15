@@ -35,6 +35,7 @@ export class PluginState {
   private _fallbackModel: { providerID: string; modelID: string } | undefined;
   private _pendingResumes = new Map<string, PendingResumeInfo>();
   private _pendingEnrichments = new Set<string>();
+  private _lastUserText = new Map<string, string>();
 
   agentOf(sessionID: string): string | undefined {
     return this._agents.get(sessionID);
@@ -47,6 +48,7 @@ export class PluginState {
   forgetAgent(sessionID: string): void {
     this._agents.delete(sessionID);
     this._models.delete(sessionID);
+    this._lastUserText.delete(sessionID);
   }
 
   recordModel(sessionID: string, model: { providerID: string; modelID: string }): void {
@@ -126,6 +128,16 @@ export class PluginState {
   /** Check whether a pending enrichment flag exists for a sessionID. */
   hasPendingEnrichment(sessionID: string): boolean {
     return this._pendingEnrichments.has(sessionID);
+  }
+
+  recordLastUserText(sessionID: string, text: string): void {
+    this._lastUserText.set(sessionID, text.slice(0, 500));
+  }
+
+  consumeLastUserText(sessionID: string): string | undefined {
+    const text = this._lastUserText.get(sessionID);
+    this._lastUserText.delete(sessionID);
+    return text;
   }
 }
 

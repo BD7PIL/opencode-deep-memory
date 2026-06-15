@@ -54,12 +54,20 @@ export class BM25Index {
   private readonly k1: number;
   private readonly b: number;
   private readonly documents = new Map<string, DocEntry>();
-  /** Per-term document frequency (number of documents containing the term). */
   private readonly df = new Map<string, number>();
-  /** Cached IDF values (invalidated when df changes). */
-  private idfCache = new Map<string, number>();
+  private readonly idfCache = new Map<string, number>();
+  private readonly timestamps = new Map<string, number>();
   private idfDirty = true;
   private totalDocLen = 0;
+
+  private static readonly DECAY_HALF_LIFE: Record<string, number> = {
+    Constraints: Infinity,
+    Rules: Infinity,
+    Decisions: 180,
+    Gotchas: 90,
+    Facts: 60,
+    Notes: 30,
+  };
 
   constructor(opts?: BM25Options) {
     this.k1 = opts?.k1 ?? 1.5;
@@ -80,9 +88,12 @@ export class BM25Index {
   /**
    * Add or replace a document.
    */
-  addDocument(docId: string, tokens: string[]): void {
-    // Remove existing entry first (if replacing)
+  addDocument(docId: string, tokens: string[], timestamp?: Date): void {
     this.removeDocument(docId);
+
+    if (timestamp) {
+      this.timestamps.set(docId, timestamp.getTime());
+    }
 
     const termFreq = new Map<string, number>();
     for (const token of tokens) {
@@ -108,6 +119,7 @@ export class BM25Index {
     if (!entry) return;
 
     this.documents.delete(docId);
+    this.timestamps.delete(docId);
     this.totalDocLen -= entry.docLen;
 
     // Update document frequency
@@ -131,7 +143,7 @@ export class BM25Index {
    */
   search(
     queryTokens: string[],
-    opts?: { limit?: number; minScore?: number },
+    opts?: { limit?: number; minScore?: number; applyDecay?: boolean; now?: number },
   ): BM25Result[] {
     const limit = opts?.limit ?? 10;
     const minScore = opts?.minScore ?? 0;
@@ -179,7 +191,25 @@ export class BM25Index {
       }
     }
     results.sort((a, b) => b.score - a.score);
-    return results.slice(0, limit);
+    const limited = results.slice(0, limit);
+
+    if (opts?.applyDecay) {
+      const now = opts.now ?? Date.now();
+      for (const r of limited) {
+        const ts = this.timestamps.get(r.docId);
+        if (!ts) continue;
+        const hashIdx = r.docId.indexOf("#");
+        const heading = hashIdx !== -1 ? r.docId.slice(hashIdx + 1) : "";
+        const halfLife = BM25Index.DECAY_HALF_LIFE[heading] ?? 90;
+        if (isFinite(halfLife)) {
+          const ageDays = (now - ts) / 86400000;
+          r.score *= Math.pow(0.5, ageDays / halfLife);
+        }
+      }
+      limited.sort((a, b) => b.score - a.score);
+    }
+
+    return limited;
   }
 
   /**

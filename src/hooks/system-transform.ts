@@ -8,6 +8,7 @@
 import type { Hooks } from "@opencode-ai/plugin";
 import type { PluginState } from "./shared-state.js";
 import type { Logger } from "../shared/log.js";
+import type { SearchService } from "../search/service.js";
 import { composeSystemPayload } from "../inject/system-payload.js";
 import { classifyAgent } from "../inject/agent-budget.js";
 
@@ -17,10 +18,10 @@ import { classifyAgent } from "../inject/agent-budget.js";
 export function createSystemTransformHandler(
   state: PluginState,
   projectPath: string,
+  searchService?: SearchService,
   logger?: Logger,
 ): NonNullable<Hooks["experimental.chat.system.transform"]> {
   return async (input, output) => {
-    // 1. If no sessionID, skip (can't determine agent/state)
     if (!input.sessionID) {
       logger?.debug("system.transform: no sessionID, skipping");
       return;
@@ -28,7 +29,6 @@ export function createSystemTransformHandler(
 
     const sessionID = input.sessionID;
 
-    // 2. Determine mode
     let mode: "normal" | "post-compaction" | "post-resume" = "normal";
 
     if (state.hasPendingResume(sessionID)) {
@@ -36,26 +36,26 @@ export function createSystemTransformHandler(
       const tier = classifyAgent(agent);
       if (tier === "main") {
         mode = "post-resume";
-        // Consume the flag — only first call gets post-resume budget
         state.consumePendingResume(sessionID);
       }
     }
 
-    // 3. Compose payload
-    const payload = composeSystemPayload({
+    const userQuery = state.consumeLastUserText(sessionID);
+
+    const payload = await composeSystemPayload({
       state,
       sessionID,
       projectPath,
       mode,
+      searchService,
+      userQuery,
       logger,
     });
 
-    // 4. Push to output if non-empty
     if (payload) {
       output.system.push(payload);
     }
 
-    // 5. Log
     const agent = state.agentOf(sessionID);
     const tier = classifyAgent(agent);
     logger?.debug("system.transform: injected", {

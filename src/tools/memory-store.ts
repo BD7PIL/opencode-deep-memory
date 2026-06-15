@@ -32,8 +32,10 @@ export function createMemoryStoreTool(service: SearchService) {
         note: "Notes",
       };
       const section = sectionMap[args.type] ?? "Notes";
+      const today = new Date().toISOString().slice(0, 10);
+      const contentWithDate = `${args.content} [${today}]`;
 
-      await service.addEntry(args.scope, "memory", section, args.content);
+      await service.addEntry(args.scope, "memory", section, contentWithDate);
 
       return `Stored ${args.type} in ${args.scope} memory under ## ${section}`;
     },

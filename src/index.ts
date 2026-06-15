@@ -92,12 +92,14 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
 
     "chat.message": createChatMessageHandler({
       projectPath,
+      state,
       logger: logger.for("chat-message"),
     }),
 
     "experimental.chat.system.transform": createSystemTransformHandler(
       state,
       projectPath,
+      searchService,
       logger.for("system-transform"),
     ),
 

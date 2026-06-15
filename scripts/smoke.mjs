@@ -49,7 +49,9 @@ async function main() {
   console.log();
 
   const mod = await import(`file://${path.resolve("dist/index.js")}`);
-  check("dist/index.js loads", typeof mod.default === "function");
+  check("dist/index.js loads", typeof mod.default === "object" && typeof mod.default.server === "function");
+  const pluginFn = mod.default.server ?? mod.default;
+  check("PluginModule.server is callable", typeof pluginFn === "function");
 
   const mockClient = {
     session: {
@@ -67,7 +69,7 @@ async function main() {
     $: { unsafe: () => {} },
   };
 
-  const hooks = await mod.default(input);
+  const hooks = await pluginFn(input);
   check("Plugin factory returns Hooks object", typeof hooks === "object" && hooks !== null);
   check("chat.params registered", typeof hooks["chat.params"] === "function");
   check("chat.message registered", typeof hooks["chat.message"] === "function");
