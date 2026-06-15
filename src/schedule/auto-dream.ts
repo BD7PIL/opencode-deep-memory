@@ -154,7 +154,16 @@ export async function handleSessionCreatedForDream(
     return;
   }
 
-  // 6. Determine if dream is due
+  // 6. Check MEMORY.md exists — dream needs target to write to
+  const memoryPath = memoryFilePath("project", "memory", projectPath);
+  if (!fs.existsSync(memoryPath) || fs.statSync(memoryPath).size < 50) {
+    logger?.debug("auto-dream: MEMORY.md missing or too small, skipping", {
+      sessionID: info.id,
+    });
+    return;
+  }
+
+  // 8. Determine if dream is due
   const isSevenDayDue =
     schedule.lastDream === null ||
     Date.now() - Date.parse(schedule.lastDream) > DREAM_INTERVAL_MS;

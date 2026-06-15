@@ -10,7 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { PluginInput } from "@opencode-ai/plugin";
-import { scheduleFilePath } from "../shared/index.js";
+import { scheduleFilePath, memoryFilePath } from "../shared/index.js";
 import type { Logger } from "../shared/index.js";
 import { runDistill, DISTILL_INTERVAL_MS } from "./distill-executor.js";
 
@@ -138,7 +138,16 @@ export async function handleSessionCreatedForDistill(
     return;
   }
 
-  // 5. Check if distill is due
+  // 6. Check MEMORY.md exists — skip if no persistent memory yet
+  const memoryPath = memoryFilePath("project", "memory", projectPath);
+  if (!fs.existsSync(memoryPath) || fs.statSync(memoryPath).size < 50) {
+    logger?.debug("auto-distill: MEMORY.md missing or too small, skipping", {
+      sessionID: info.id,
+    });
+    return;
+  }
+
+  // 7. Check if distill is due
   const isDue =
     schedule.lastDistill == null ||
     Date.now() - Date.parse(schedule.lastDistill) > DISTILL_INTERVAL_MS;

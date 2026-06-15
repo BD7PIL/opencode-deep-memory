@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { handleSessionCreatedForDistill } from "../../src/schedule/auto-distill.js";
-import { scheduleFilePath } from "../../src/shared/paths.js";
+import { scheduleFilePath, memoryFilePath } from "../../src/shared/paths.js";
 
 // Mock the distill executor
 vi.mock("../../src/schedule/distill-executor.js", () => ({
@@ -62,6 +62,12 @@ describe("handleSessionCreatedForDistill", () => {
     return JSON.parse(fs.readFileSync(getSchedulePath(), "utf8"));
   }
 
+  function ensureMemoryExists(): void {
+    const memoryPath = memoryFilePath("project", "memory", projectPath);
+    fs.mkdirSync(path.dirname(memoryPath), { recursive: true });
+    fs.writeFileSync(memoryPath, "## Decisions\n- Use TypeScript for type safety and maintainability.\n- Use Prisma ORM for database access.\n", "utf8");
+  }
+
   it("skips session with parentID set (sub-session)", async () => {
     await handleSessionCreatedForDistill({
       event: makeEvent({ parentID: "parent-1" }),
@@ -84,6 +90,7 @@ describe("handleSessionCreatedForDistill", () => {
   });
 
   it("schedule file missing → triggers distill, creates schedule with lastDistill=now", async () => {
+    ensureMemoryExists();
     const before = Date.now();
 
     await handleSessionCreatedForDistill({
@@ -105,6 +112,7 @@ describe("handleSessionCreatedForDistill", () => {
   });
 
   it("lastDistill 31 days ago → triggers distill", async () => {
+    ensureMemoryExists();
     const thirtyOneDaysAgo = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
     writeSchedule({ lastDream: null, lastDistill: thirtyOneDaysAgo });
 

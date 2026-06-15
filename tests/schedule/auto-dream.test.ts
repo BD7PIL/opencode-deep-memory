@@ -65,6 +65,12 @@ describe("handleSessionCreatedForDream", () => {
     fs.writeFileSync(notesPath, content, "utf8");
   }
 
+  function ensureMemoryExists(): void {
+    const memoryPath = memoryFilePath("project", "memory", projectPath);
+    fs.mkdirSync(path.dirname(memoryPath), { recursive: true });
+    fs.writeFileSync(memoryPath, "## Decisions\n- Use TypeScript for type safety and maintainability.\n- Use Prisma ORM for database access.\n", "utf8");
+  }
+
   function readSchedule(): ScheduleFile {
     return JSON.parse(fs.readFileSync(getSchedulePath(), "utf8"));
   }
@@ -91,6 +97,7 @@ describe("handleSessionCreatedForDream", () => {
   });
 
   it("schedule file missing → triggers dream, creates schedule file with lastDream=now", async () => {
+    ensureMemoryExists();
     ensureNotesExists();
     const before = Date.now();
 
@@ -113,6 +120,7 @@ describe("handleSessionCreatedForDream", () => {
   });
 
   it("lastDream 8 days ago → triggers dream", async () => {
+    ensureMemoryExists();
     ensureNotesExists();
     const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
     writeSchedule({ lastDream: eightDaysAgo, lastDistill: null });
@@ -149,6 +157,7 @@ describe("handleSessionCreatedForDream", () => {
   });
 
   it("lastDream 2 days ago + notes.md > 20 lines → triggers via accumulation", async () => {
+    ensureMemoryExists();
     ensureNotesExists(25); // > 20 lines
     const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
     writeSchedule({ lastDream: twoDaysAgo, lastDistill: null });
@@ -212,6 +221,7 @@ describe("handleSessionCreatedForDream", () => {
   });
 
   it("updates lastDream IMMEDIATELY before spawning dream (file modified before promptAsync)", async () => {
+    ensureMemoryExists();
     ensureNotesExists();
     const writeCalls: string[] = [];
     const originalWriteFileSync = fs.writeFileSync;
