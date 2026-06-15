@@ -89,12 +89,14 @@ export async function handleSessionCreated(
   }
 
   // 5. Set pending resume
-  state.setPendingResume(sessionID, {
+  const wasSet = state.setPendingResume(sessionID, {
     budgetTokens: 3000,
     projectHash,
   });
 
-  logger?.info(
-    `Resume detected for session ${sessionID}, project ${projectHash}, MEMORY.md size ${memorySize}`,
-  );
+  if (wasSet) {
+    logger?.info(
+      `Resume detected for session ${sessionID}, project ${projectHash}, MEMORY.md size ${memorySize}`,
+    );
+  }
 }
