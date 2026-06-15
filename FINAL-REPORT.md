@@ -163,6 +163,66 @@ With 50 memories and 800t budget (5-tier):
 
 ---
 
+## 6. Quantified Comparison (E2E-Measured)
+
+### 6.1 Injectie zuiveringsprogressie (E2E gemeten)
+
+| Ronde | reasoning_cleared | metadata_stripped | Totaal gestript |
+|-------|-------------------|-------------------|-----------------|
+| R9 | 1 | 0 | 1 |
+| R10 | 1 | 0 | 1 |
+| R11 | 3 | 0 | 3 |
+| R12 | 1 | 0 | 1 |
+| R13 | 2 | 0 | 2 |
+| R14 | 3 | 0 | 3 |
+| **Cumulatief** | **11** | **0** | **11** |
+
+**Bron**: `deep-memory-debug.log` (DeepSeek v4-pro, 15-ronden sessie)
+
+### 6.2 m[0]/m[1] Cachestabiliteit (E2E gemeten)
+
+| Mode | stableSize | volatileSize | Aantal metingen | Consistent? |
+|------|-----------|-------------|----------------|-------------|
+| post-resume | 2053 chars | 76 chars | 1 | ✅ |
+| normal | 1210-1234 chars | 76-539 chars | 7 | ✅ stable prefix identiek |
+
+**Bron**: `deep-memory-debug.log` (44 composeSystemPayload oproepen)
+
+### 6.3 Modelcompatibiliteit (E2E gemeten)
+
+| Model | Provider | memory_search | memory_store | Snelheid |  
+|-------|----------|--------------|-------------|---------|
+| deepseek-v4-pro | deepseek | ✅ (impliciet via injectie) | ✅ (7 entries opgeslagen) | ~10s/r |  
+| mimo-v2.5 | xiaomi-token-plan-cn | ✅ "Found 2 entries" | ✅ "Stored decision" | ~15s/r |  
+| deepseek-chat | openrouter | ✅ | ✅ | ~14s/r |  
+| glm-5.1 | zhipu-ai-coding-plan | ❌ | ❌ | non-responsief |  
+| glm-5.2 | zhipu-ai-coding-plan | ❌ | ❌ | non-responsief |  
+
+### 6.4 Vergelijking met referentieprojecten
+
+| Dimensie | MiMo FTS5 | DCP | Magic Context | Onze Plugin | Bron |
+|-----------|----------|-----|-------------|-----------|------|
+| Zoeksnelheid (1000 docs) | ~105ms | — | — | **6.4ms (16× sneller)** | BM25 benchmark |
+| CJK recall | 70% (unicode61) | — | — | **100% (bigram)** | tokenizer.test.ts |
+| Injectiebudget | 33K vast | Variabel | Druk-adaptief | **800/3000/400/80t agent-tier** | E2E log |
+| Compressieratio | 0% | 50-70% (onstable) | Gelaagd | **11 reasoning parts gestript (15 ronden)** | E2E log |
+| Cachebesparing | — | Geen | m[0]/m[1] | **m[0]/m[1] (38% injectie gecached)** | E2E log |
+| Runtime dependencies | 1 (SQLite) | 2+ (native) | 2 (SQLite+LLM) | **0** | package.json |
+| Configcomplexiteit | — | 100+ opties | SQL | **3 env vars** | src/shared/log.ts |
+| Kwaliteit-determinisme | Ja | Nee (#555,#556,#560) | Ja | **Ja (heuristisch)** | 275 unit tests |
+| Informatiedichtheid (50 entries, 800t) | 5 getoond | — | ~10 (geschat) | **16 getoond** | STRESS test |
+| Geheugenpersistentie | SQLite FTS5 | Geen | SQLite | **Markdown + BM25** | .deep-memory/MEMORY.md |
+
+### 6.5 E2E Hook Statestieken
+
+| Hook | Oproepen | Actief |
+|------|---------|--------|
+| chat-params | 66 | ✅ |
+| system-transform | 44 | ✅ |
+| messages-transform | 7 | ✅ |
+| event (session.created) | 43 | ✅ |
+
+
 ## 5. Verification Scorecard
 
 | Verification Layer | Count | Status |
