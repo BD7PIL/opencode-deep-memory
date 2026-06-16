@@ -7,3 +7,5 @@ coverage/
 .env.local
 .deep-memory-debug.log
 index-diagnostics.json
+docs/
+docs/

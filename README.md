@@ -124,14 +124,35 @@ Copy `.opencode/command/*.md` to your project:
 - `/dream` — consolidate notes into persistent memory
 - `/distill` — package recurring workflows into skills
 
-## Architecture
+## Design
 
-See [docs/DESIGN.md](docs/DESIGN.md) for full architecture.
-See [docs/OPTIMIZATION-PLAN-v0.3.md](docs/OPTIMIZATION-PLAN-v0.3.md) for optimization history.
+**Memory entries** carry a type (`decision`, `constraint`, `gotcha`, `fact`, `note`) and
+an importance score. Importance is heuristically derived from entry type, recency,
+frequency across sessions, and keyword-match relevance to the current query —
+no LLM calls required.
+
+Entries are stored as Markdown sections (e.g. `## Decisions`, `## Constraints`) in
+`MEMORY.md`, with `[date]` timestamps for time-based decay. The BM25 index is rebuilt
+from these files on startup and updated incrementally on write.
+
+Background consolidation runs on a 7-day cycle (auto-dream) plus an accumulation trigger
+(when `notes.md` exceeds 20 lines). A separate 30-day cycle (auto-distill) packages
+recurring workflows into skill candidates. Both use background sessions to avoid
+consuming the main session's context budget.
 
 ## Acknowledgments
 
-Inspired by [MiMo-Code](https://github.com/XiaomiMiMo/MiMo-Code), [Magic Context](https://github.com/cortexkit/magic-context), [Aider](https://github.com/paul-gauthier/aider), [Roo Code](https://github.com/RooCodeInc/Roo-Code), [Continue.dev](https://github.com/continuedev/continue), [OpenHands](https://github.com/All-Hands-AI/OpenHands), and [Plandex](https://github.com/plandex-ai/plandex).
+[MiMo-Code](https://github.com/XiaomiMiMo/MiMo-Code) pioneered deep memory integration for OpenCode.
+
+[Magic Context](https://github.com/cortexkit/magic-context) demonstrated cache-stable context layout, deterministic decay, and content stripping in a plugin.
+
+[Aider](https://github.com/paul-gauthier/aider) showed how tree-sitter-based code structure awareness (repo map) can give an agent knowledge of a codebase without reading every file.
+
+[Roo Code](https://github.com/RooCodeInc/Roo-Code) introduced folded file context recovery and non-destructive condensing.
+
+[Continue.dev](https://github.com/continuedev/continue) built a hybrid retrieval pipeline combining embeddings, FTS, and recency signals.
+
+[OpenHands](https://github.com/All-Hands-AI/OpenHands) and [Plandex](https://github.com/plandex-ai/plandex) contributed conversation summarization and context budgeting patterns.
 
 ## Development
 
