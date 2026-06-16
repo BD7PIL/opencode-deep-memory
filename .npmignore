@@ -13,4 +13,5 @@ OPTIMIZATION-PLAN-v0.3.md
 DESIGN-SPEC-VERIFICATION.md
 FINAL-REPORT.md
 .gitignore
+docs/
 .deep-memory-debug.log
