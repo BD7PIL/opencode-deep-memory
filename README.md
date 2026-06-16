@@ -4,13 +4,14 @@
 
 ## What it does
 
-OpenCode sessions are stateless. Every restart is a cold start. Native compaction destroys conversation content.
+OpenCode sessions are stateless. Every restart is a cold start. Native compaction
+destroys conversation content. **deep-memory** adds three layers:
 
-**deep-memory** adds three layers:
-
-- **Remember** — decisions, constraints, gotchas survive across sessions via BM25 + CJK search
-- **Recover** — checkpoint captures conversation before compaction destroys it; resume injection recalls everything
-- **Compress** — strips reasoning metadata and old content deterministically, without LLM calls
+| Layer | Hook | Purpose |
+|-------|------|---------|
+| **Remember** | `memory_search`, `memory_store`, `memory_forget`, `memory_expand` | Decisions, constraints, gotchas survive across sessions via BM25 + CJK search. Storage at `.deep-memory/` in your project root — visible, version-controllable. |
+| **Recover** | `session.created`, `experimental.session.compacting` | Checkpoint captures conversation before compaction destroys it. Resume injection recalls everything on a new session (3000 token first-turn budget). |
+| **Compress** | `experimental.chat.messages.transform` | Old reasoning, metadata, system injections, and thinking tags stripped deterministically — no LLM calls. Cache-stable sentinel replacements preserve prompt cache. |
 
 ## Quick start
 
@@ -142,17 +143,31 @@ consuming the main session's context budget.
 
 ## Acknowledgments
 
-[MiMo-Code](https://github.com/XiaomiMiMo/MiMo-Code) pioneered deep memory integration for OpenCode.
+**[MiMo-Code][]** — a terminal-native AI coding assistant with persistent memory that keeps a
+deep understanding of your project across sessions while continuously improving itself.
 
-[Magic Context](https://github.com/cortexkit/magic-context) demonstrated cache-stable context layout, deterministic decay, and content stripping in a plugin.
+**[Magic Context][]** — unbounded context. Memory that manages itself. One session, for life.
+The hippocampus for coding agents, part of CortexKit.
 
-[Aider](https://github.com/paul-gauthier/aider) showed how tree-sitter-based code structure awareness (repo map) can give an agent knowledge of a codebase without reading every file.
+**[Aider][]** — AI pair programming in your terminal. Lets you pair program with LLMs to start
+a new project or build on your existing codebase.
 
-[Roo Code](https://github.com/RooCodeInc/Roo-Code) introduced folded file context recovery and non-destructive condensing.
+**[Roo Code][]** — a whole dev team of AI agents in your code editor.
 
-[Continue.dev](https://github.com/continuedev/continue) built a hybrid retrieval pipeline combining embeddings, FTS, and recency signals.
+**[Continue][]** — pioneering open-source coding agent, available as a CLI, VS Code extension,
+and JetBrains plugin.
 
-[OpenHands](https://github.com/All-Hands-AI/OpenHands) and [Plandex](https://github.com/plandex-ai/plandex) contributed conversation summarization and context budgeting patterns.
+**[OpenHands][]** — Code Less, Make More. A community focused on AI-driven development.
+
+**[Plandex][]** — an AI coding agent designed for large tasks and real world projects.
+
+[MiMo-Code]: https://github.com/XiaomiMiMo/MiMo-Code
+[Magic Context]: https://github.com/cortexkit/magic-context
+[Aider]: https://github.com/Aider-AI/aider
+[Roo Code]: https://github.com/RooCodeInc/Roo-Code
+[Continue]: https://github.com/continuedev/continue
+[OpenHands]: https://github.com/All-Hands-AI/OpenHands
+[Plandex]: https://github.com/plandex-ai/plandex
 
 ## Development
 
