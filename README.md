@@ -53,19 +53,49 @@ OpenCode auto-installs on startup. Memory appears at `.deep-memory/` in your pro
 └─────────────────────────────────────────────┘
 ```
 
-## Context compression (zero LLM)
+## Context compression
 
-Unlike DCP (LLM summarization), we strip deterministically:
+Old messages (>8 turns) are compressed deterministically, without calling an LLM.
+The key insight: **reasoning is a disposable process** — once the model reaches a conclusion
+(in the text or tool output), the reasoning that got it there no longer affects future turns.
+Similarly, API metadata, system notifications, and inline thinking tags carry no value
+once the conversation moves past them. We strip these in-place, replacing removed parts
+with sentinels so message structure stays intact and prompt caching is preserved.
 
-| What gets stripped | Savings | Why safe |
-|--------------------|---------|----------|
-| `reasoning_details` metadata | ~18.5% | API metadata, not model input |
-| Old reasoning → `[cleared]` | ~24% | Conclusions already in text output |
-| System injections (`<system-reminder>`) | ~5% | Internal plumbing |
-| Tool errors >100 chars | ~2% | Old errors only need "it failed" |
-| Inline `<thinking>` tags | ~2% | Process, not product |
+| What gets stripped | How | Why safe |
+|--------------------|-----|----------|
+| `reasoning_details` metadata | Delete the JSON blob from the part | API billing metadata, never reaches the model |
+| Old reasoning text | Set `thinking`/`text` to `"[cleared]"` | Conclusions are in the assistant's text output |
+| System injections | Replace entire message with sentinel | `<system-reminder>` and OMO markers are stale after one turn |
+| Tool errors >100 chars | Truncate to first 100 chars | An old error only needs "it failed", not the full trace |
+| Inline `<thinking>` tags | Regex strip from old assistant text | Same as reasoning — process, not product |
 
-**Never touches**: user messages, recent 8 messages, tool calls, tool results.
+**Never touched**: user messages (anchor turn boundaries), recent 8 messages (working context),
+tool calls and their results (API pairing integrity).
+
+## Cache-stable injection
+
+Each turn pushes two system prompt fragments:
+
+- **Stable** (`<deep-memory-stable>`): constraints, rules, and the tool hint.
+  These change only when MEMORY.md is updated — typically across sessions, not turns.
+  Because they're byte-identical turn after turn, the provider's prompt cache hits on this prefix.
+
+- **Volatile** (`<deep-memory-volatile>`): context-aware search results from the user's
+  current query, tier-allocated by importance, plus repo map symbols for recently-read files.
+  This is the only part that changes per turn.
+
+The injection budget adapts to the agent: main orchestrator gets 800 tokens per turn
+(3000 on session resume), deep-reasoning agents get 400, and tool subagents get 80.
+
+## Memory search (BM25 + CJK bigram)
+
+Instead of SQLite FTS5, we use a pure-JS BM25 engine with a CJK-aware tokenizer.
+Chinese runs are split into sliding 2-character bigrams (`"权限死锁"` →
+`["权","权限","限死","死锁","锁"]`), making multi-character CJK phrases searchable
+without an embedding model. Latin text uses standard whitespace/punctuation splitting.
+The index is rebuilt from Markdown files on startup (<250ms for 2000 entries) and
+updated incrementally on writes.
 
 ## Configuration
 
@@ -101,17 +131,7 @@ See [docs/OPTIMIZATION-PLAN-v0.3.md](docs/OPTIMIZATION-PLAN-v0.3.md) for optimiz
 
 ## Acknowledgments
 
-Built on insights from excellent projects:
-
-| Project | What we learned |
-|---------|----------------|
-| [MiMo-Code](https://github.com/XiaomiMiMo/MiMo-Code) | Deep memory integration architecture for OpenCode |
-| [Magic Context](https://github.com/cortexkit/magic-context) | m[0]/m[1] cache-stable layout, deterministic decay-curve, content stripping |
-| [Aider](https://github.com/paul-gauthier/aider) | Repo map PageRank ranking, conversation-personalized scoring |
-| [Roo Code](https://github.com/RooCodeInc/Roo-Code) | Folded file context recovery, synthetic tool result injection |
-| [Continue.dev](https://github.com/continuedev/continue) | Hybrid retrieval (embeddings + FTS + recency fusion) |
-| [OpenHands](https://github.com/All-Hands-AI/OpenHands) | Keep-first-N preservation during summarization |
-| [Plandex](https://github.com/plandex-ai/plandex) | Checkpoint-based conversation summarization |
+Inspired by [MiMo-Code](https://github.com/XiaomiMiMo/MiMo-Code), [Magic Context](https://github.com/cortexkit/magic-context), [Aider](https://github.com/paul-gauthier/aider), [Roo Code](https://github.com/RooCodeInc/Roo-Code), [Continue.dev](https://github.com/continuedev/continue), [OpenHands](https://github.com/All-Hands-AI/OpenHands), and [Plandex](https://github.com/plandex-ai/plandex).
 
 ## Development
 
