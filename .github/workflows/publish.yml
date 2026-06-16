@@ -27,3 +27,5 @@ jobs:
 
       - name: Publish
         run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ""  # Empty string prevents token auth, forces OIDC fallback
