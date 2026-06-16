@@ -5,6 +5,10 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BD7PIL/opencode-deep-memory.git"
+  },
   "files": [
     "dist",
     "README.md"
