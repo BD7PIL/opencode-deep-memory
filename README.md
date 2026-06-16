@@ -176,6 +176,22 @@ npm install
 npm run verify   # typecheck + test (363) + build + smoke (49)
 ```
 
+## CI/CD (npm Trusted Publishing)
+
+Releases use npm OIDC Trusted Publishing — no token needed. To set up for a fork:
+
+1. **npmjs.com** → Package Settings → Trusted Publishers → Add:
+   - Owner: your GitHub username
+   - Repository: your fork name
+   - Workflow filename: `publish.yml`
+2. **package.json** → update `repository.url` to match your fork
+3. **Push a tag** → GitHub Actions auto-publishes:
+   ```bash
+   git tag v1.0.0 && git push origin v1.0.0
+   ```
+
+Requirements: npm CLI ≥ 11.5.1, Node.js ≥ 22, `id-token: write` permission, public repository.
+
 ## License
 
 MIT
