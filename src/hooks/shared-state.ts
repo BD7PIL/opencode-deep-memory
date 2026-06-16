@@ -28,6 +28,43 @@ export interface PendingResumeMap {
   has(sessionID: string): boolean;
 }
 
+/** Compression stats from messages.transform. */
+export interface CompressionStats {
+  reasoning_cleared: number;
+  metadata_stripped: number;
+  system_neutralized: number;
+  tool_errors_truncated: number;
+  thinking_stripped: number;
+}
+
+/** Injection stats from system.transform. */
+export interface InjectionStats {
+  stableSize: number;
+  volatileSize: number;
+  tier: string;
+  mode: string;
+  /** Number of search results allocated into volatile. */
+  searchEntries: number;
+  /** Number of repo-map symbols injected. */
+  repoMapEntries: number;
+  /** Whether a checkpoint was injected. */
+  hasCheckpoint: boolean;
+}
+
+/** Aggregated notification data from one LLM turn. */
+export interface PendingNotify {
+  compression?: CompressionStats;
+  injection?: InjectionStats;
+  /** Total messages in the session at transform time. */
+  messageCount?: number;
+  /** Number of messages in the protected head zone. */
+  protectedHead?: number;
+  /** Number of messages in the protected tail zone. */
+  protectedTail?: number;
+  /** Timestamp of first stat write (for cooldown). */
+  setAt: number;
+}
+
 export class PluginState {
   private _agents = new Map<string, string>();
   private _models = new Map<string, { providerID: string; modelID: string }>();
@@ -36,6 +73,7 @@ export class PluginState {
   private _pendingResumes = new Map<string, PendingResumeInfo>();
   private _pendingEnrichments = new Set<string>();
   private _lastUserText = new Map<string, string>();
+  private _pendingNotify: PendingNotify | null = null;
 
   agentOf(sessionID: string): string | undefined {
     return this._agents.get(sessionID);
@@ -141,6 +179,39 @@ export class PluginState {
     const text = this._lastUserText.get(sessionID);
     this._lastUserText.delete(sessionID);
     return text;
+  }
+
+  /**
+   * Merge stats into the pending notification.
+   * Called from messages.transform (compression) and system.transform (injection).
+   * Creates a new PendingNotify on first call per turn.
+   */
+  mergeNotify(patch: Omit<PendingNotify, "setAt">): void {
+    if (!this._pendingNotify) {
+      this._pendingNotify = { ...patch, setAt: Date.now() };
+      return;
+    }
+    if (patch.compression) {
+      this._pendingNotify.compression = patch.compression;
+    }
+    if (patch.injection) {
+      this._pendingNotify.injection = patch.injection;
+    }
+    if (patch.messageCount !== undefined) {
+      this._pendingNotify.messageCount = patch.messageCount;
+    }
+    if (patch.protectedHead !== undefined) {
+      this._pendingNotify.protectedHead = patch.protectedHead;
+    }
+    if (patch.protectedTail !== undefined) {
+      this._pendingNotify.protectedTail = patch.protectedTail;
+    }
+  }
+
+  consumePendingNotify(): PendingNotify | null {
+    const n = this._pendingNotify;
+    this._pendingNotify = null;
+    return n;
   }
 }
 

@@ -118,14 +118,13 @@ function repairOrphanedToolCalls(
  * User messages are NEVER touched.
  */
 export function createMessagesTransformHandler(
-  _state: PluginState,
+  state: PluginState,
   logger?: Logger,
 ): NonNullable<Hooks["experimental.chat.messages.transform"]> {
   return async (_input, output) => {
     const messages = output.messages;
     if (messages.length <= KEEP_RECENT) return;
 
-    // C1: Skip stripping entirely if conversation is short enough
     if (messages.length <= KEEP_RECENT + PROTECTED_HEAD) return;
 
     const protectedTailStart = messages.length - KEEP_RECENT;
@@ -216,6 +215,12 @@ export function createMessagesTransformHandler(
 
     if (Object.values(stats).some(v => v > 0)) {
       logger?.debug("messages.transform: stripped", stats);
+      state.mergeNotify({
+        compression: stats,
+        messageCount: messages.length,
+        protectedHead: PROTECTED_HEAD,
+        protectedTail: KEEP_RECENT,
+      });
     }
   };
 }

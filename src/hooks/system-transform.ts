@@ -44,7 +44,7 @@ export function createSystemTransformHandler(
 
     const userQuery = state.consumeLastUserText(sessionID);
 
-    const { stable, volatile } = await composeSystemPayload({
+    const { stable, volatile, stats: payloadStats } = await composeSystemPayload({
       state,
       sessionID,
       projectPath,
@@ -71,6 +71,18 @@ export function createSystemTransformHandler(
       mode,
       stableSize: stable.length,
       volatileSize: volatile.length,
+    });
+
+    state.mergeNotify({
+      injection: {
+        stableSize: stable.length,
+        volatileSize: volatile.length,
+        tier,
+        mode,
+        searchEntries: payloadStats.searchEntries,
+        repoMapEntries: payloadStats.repoMapEntries,
+        hasCheckpoint: payloadStats.hasCheckpoint,
+      },
     });
   };
 }

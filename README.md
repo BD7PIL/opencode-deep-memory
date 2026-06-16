@@ -49,7 +49,7 @@ OpenCode auto-installs on startup. Memory appears at `.deep-memory/` in your pro
 ┌─────────────────────┴───────────────────────┐
 │                  event                      │
 │  session.created → resume + dream schedule  │
-│  session.idle    → enrichment               │
+│  session.idle    → enrichment + notify      │
 │  session.compacted → checkpoint             │
 └─────────────────────────────────────────────┘
 ```
@@ -73,6 +73,30 @@ with sentinels so message structure stays intact and prompt caching is preserved
 
 **Never touched**: user messages (anchor turn boundaries), recent 8 messages (working context),
 tool calls and their results (API pairing integrity).
+
+## Toast notifications
+
+After each LLM turn, deep-memory shows a toast notification (bottom-right corner) summarizing
+what was compressed and injected. The notification level is chosen automatically:
+
+| Scenario | Level | Content |
+|----------|-------|---------|
+| Injection only (no compression) | minimal | One-line summary: `-8.5K stripped` |
+| Compression (short session) | detailed | Progress bar + per-category breakdown |
+| Compression + rich context (repo-map, memory, checkpoint) | extended | Full panel with budget usage |
+
+Example toast (detailed level):
+
+```
+deep-memory | compressed
+─ Compression ─────────────────────────────
+│████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
+  reasoning -6.2K | metadata -2.1K | tool_err -0.8K
+─ Injection ───────────────────────────────
+  m[0] stable 1055B ✓  m[1] volatile 574B
+  tier=main | mode=normal
+  repo-map: 12 symbols | memory: 8 entries
+```
 
 ## Cache-stable injection
 

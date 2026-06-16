@@ -1,17 +1,7 @@
-/**
- * chat.params hook handler.
- *
- * Records the sessionID → agent mapping so that system.transform
- * can look up the agent for adaptive budget selection.
- */
-
 import type { Hooks } from "@opencode-ai/plugin";
 import type { PluginState } from "./shared-state.js";
 import type { Logger } from "../shared/log.js";
 
-/**
- * Create a chat.params handler that records agent mappings.
- */
 export function createChatParamsHandler(
   state: PluginState,
   logger?: Logger,

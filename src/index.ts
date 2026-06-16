@@ -30,6 +30,7 @@ import { SearchService } from "./search/service.js";
 import { createMemoryTools } from "./tools/index.js";
 import { createCompactingHandler } from "./hooks/compacting.js";
 import { createMessagesTransformHandler } from "./hooks/messages-transform.js";
+import { createNotifyHandler } from "./hooks/notify.js";
 import { runEnrichment } from "./extract/enrich.js";
 import { RepoMapTracker } from "./repomap/tracker.js";
 import { getLanguage } from "./repomap/extractor.js";
@@ -88,9 +89,13 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
   });
 
   const memoryTools = createMemoryTools(searchService, { projectPath });
+  const notify = createNotifyHandler(input.client, logger.for("notify"));
 
   const hooks: Hooks = {
-    "chat.params": createChatParamsHandler(state, logger.for("chat-params")),
+    "chat.params": createChatParamsHandler(
+      state,
+      logger.for("chat-params"),
+    ),
 
     "chat.message": createChatMessageHandler({
       projectPath,
@@ -177,6 +182,20 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
           } else {
             logger.debug("event session.idle (no pending enrichment)");
           }
+
+          if (idleSessionID) {
+            const pending = state.consumePendingNotify();
+            if (pending) {
+              try {
+                await notify(idleSessionID, pending);
+              } catch (err) {
+                logger.debug("idle notify failed (non-fatal)", {
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              }
+            }
+          }
+
           return;
         }
 

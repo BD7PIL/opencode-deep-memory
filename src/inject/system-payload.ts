@@ -33,9 +33,19 @@ export interface ComposeSystemPayloadOpts {
   tracker?: RepoMapTracker;
 }
 
+export interface ComposeSystemPayloadResult {
+  stable: string;
+  volatile: string;
+  stats: {
+    searchEntries: number;
+    repoMapEntries: number;
+    hasCheckpoint: boolean;
+  };
+}
+
 export async function composeSystemPayload(
   opts: ComposeSystemPayloadOpts,
-): Promise<{ stable: string; volatile: string }> {
+): Promise<ComposeSystemPayloadResult> {
   const { state, sessionID, projectPath, mode, searchService, userQuery, logger, tracker } = opts;
 
   const agent = sessionID ? state.agentOf(sessionID) : undefined;
@@ -46,6 +56,7 @@ export async function composeSystemPayload(
     return {
       stable: `<deep-memory-stable>\n<tool-hint>${TOOL_HINT}</tool-hint>\n</deep-memory-stable>`,
       volatile: "",
+      stats: { searchEntries: 0, repoMapEntries: 0, hasCheckpoint: false },
     };
   }
 
@@ -61,6 +72,7 @@ export async function composeSystemPayload(
   const stable = `<deep-memory-stable>\n<tool-hint>${TOOL_HINT}</tool-hint>\n<constraints>\n${staticMemory || "(empty)"}\n</constraints>\n</deep-memory-stable>`;
 
   let volatileContent = "";
+  let searchEntries = 0;
   if (userQuery && searchService && searchBudget > 0) {
     try {
       const results = await searchService.search(userQuery, { scope: "all", limit: 20, applyDecay: true });
@@ -75,6 +87,7 @@ export async function composeSystemPayload(
           })),
           { budget: searchBudget },
         );
+        searchEntries = allocated.length;
         volatileContent = allocated.map((a) => a.rendered).join("\n");
       }
     } catch {
@@ -83,11 +96,13 @@ export async function composeSystemPayload(
   }
 
   let checkpointContent = "";
+  let hasCheckpoint = false;
   if (budget.checkpointSummary > 0) {
     const checkpointPath = memoryFilePath("project", "checkpoint", projectPath);
     checkpointContent = budgetedRead(checkpointPath, budget.checkpointSummary, [
       "User Intent", "Decisions", "Constraints", "Gotchas", "File Changes",
     ]);
+    hasCheckpoint = !!checkpointContent;
   }
 
   let volatile = `<deep-memory-volatile>\n<relevant>\n${volatileContent || "(none)"}\n</relevant>`;
@@ -95,9 +110,11 @@ export async function composeSystemPayload(
     volatile += `\n<last-checkpoint>\n${checkpointContent}\n</last-checkpoint>`;
   }
 
+  let repoMapSymbols = 0;
   if (tracker && budget.repomap > 0) {
     const repomapEntries = tracker.getTopSymbols(budget.repomap);
     if (repomapEntries.length > 0) {
+      repoMapSymbols = repomapEntries.length;
       volatile += "\n" + formatRepoMap(repomapEntries);
     }
   }
@@ -112,5 +129,5 @@ export async function composeSystemPayload(
     volatileSize: volatile.length,
   });
 
-  return { stable, volatile };
+  return { stable, volatile, stats: { searchEntries, repoMapEntries: repoMapSymbols, hasCheckpoint } };
 }
