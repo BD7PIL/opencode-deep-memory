@@ -20,7 +20,7 @@ destroys conversation content. **deep-memory** adds three layers:
 {
   "plugin": [
     "oh-my-openagent",
-    "opencode-deep-memory"
+    "@bd7pil/opencode-deep-memory"
   ]
 }
 ```
