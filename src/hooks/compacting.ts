@@ -13,6 +13,7 @@
 import type { Logger } from "../shared/log.js";
 import type { Hooks } from "@opencode-ai/plugin";
 import type { PluginState } from "./shared-state.js";
+import type { RepoMapTracker } from "../repomap/tracker.js";
 import { captureMessages } from "../extract/capture.js";
 import { extractHeuristics } from "../extract/heuristics.js";
 import { renderCheckpoint, writeCheckpoint } from "../extract/checkpoint-writer.js";
@@ -34,6 +35,7 @@ export interface CompactingHandlerArgs {
   state: PluginState;
   projectPath: string;
   logger?: Logger;
+  tracker?: RepoMapTracker;
 }
 
 /**
@@ -45,7 +47,7 @@ export interface CompactingHandlerArgs {
 export function createCompactingHandler(
   args: CompactingHandlerArgs,
 ): NonNullable<Hooks["experimental.session.compacting"]> {
-  const { client, state, projectPath, logger } = args;
+  const { client, state, projectPath, logger, tracker } = args;
 
   return async (input, output) => {
     const { sessionID } = input;
@@ -80,7 +82,18 @@ export function createCompactingHandler(
 
       // Step 3: Render and write checkpoint.md
       const tokenEstimate = estimateTokensSum(result.userIntents);
-      const markdown = renderCheckpoint({ sessionID, tokenEstimate, result });
+
+      let foldedContext: string | undefined;
+      if (tracker) {
+        const recentFiles = tracker.getRecentlyRead(10);
+        if (recentFiles.length > 0) {
+          foldedContext = recentFiles.map(f =>
+            `${f.path}:\n  ${f.symbols.slice(0, 10).map(s => s.name).join(", ")}`
+          ).join("\n");
+        }
+      }
+
+      const markdown = renderCheckpoint({ sessionID, tokenEstimate, result, foldedContext });
       const checkpointPath = await writeCheckpoint({
         projectPath,
         sessionID,

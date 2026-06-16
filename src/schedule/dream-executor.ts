@@ -38,6 +38,15 @@ Steps:
    ## Consolidated {{ISO timestamp}}
    (Move processed entries under this header — do NOT delete them, preserve audit trail.)
 
+VERIFICATION STEP (before storing each finding):
+For each memory that references a specific source file:
+1. Use the read tool to check the file still exists and contains the referenced symbol
+2. If the file no longer exists or the referenced function/class/variable was removed/renamed:
+   - Call memory_forget to remove the stale entry
+   - Do NOT store the new finding
+3. Only store memories that reference files and symbols that STILL EXIST in the codebase
+4. Limit verification to 5 files maximum (do not read more than 5 files during this dream cycle)
+
 Be selective: only store findings that will matter in future sessions. Skip transient details, tool output noise, and one-off questions. Aim for 5-15 high-quality entries per dream cycle.
 
 IMPORTANT: Only consolidate findings about the PROJECT DOMAIN. Do NOT store meta-patterns about the memory plugin itself (e.g., "user says 记住 → call memory_store"). Those are plugin internals, not project knowledge.

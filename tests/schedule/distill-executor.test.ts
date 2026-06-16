@@ -118,4 +118,14 @@ describe("runDistill", () => {
   it("DISTILL_INTERVAL_MS is 30 days", () => {
     expect(DISTILL_INTERVAL_MS).toBe(30 * 24 * 60 * 60 * 1000);
   });
+
+  it("DISTILL_PROMPT_TEMPLATE contains VERIFICATION STEP", async () => {
+    const { DISTILL_PROMPT_TEMPLATE } = await import(
+      "../../src/schedule/distill-executor.js"
+    );
+    expect(DISTILL_PROMPT_TEMPLATE).toContain("VERIFICATION STEP");
+    expect(DISTILL_PROMPT_TEMPLATE).toContain(
+      "Limit verification to 5 files maximum",
+    );
+  });
 });

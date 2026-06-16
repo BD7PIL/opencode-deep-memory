@@ -60,6 +60,9 @@ export class BM25Index {
   private idfDirty = true;
   private totalDocLen = 0;
 
+  private readonly queryCache = new Map<string, BM25Result[]>();
+  private static readonly CACHE_SIZE = 50;
+
   private static readonly DECAY_HALF_LIFE: Record<string, number> = {
     Constraints: Infinity,
     Rules: Infinity,
@@ -109,6 +112,7 @@ export class BM25Index {
       this.df.set(term, (this.df.get(term) ?? 0) + 1);
     }
     this.idfDirty = true;
+    this.queryCache.clear();
   }
 
   /**
@@ -134,6 +138,7 @@ export class BM25Index {
       }
     }
     this.idfDirty = true;
+    this.queryCache.clear();
   }
 
   /**
@@ -149,6 +154,13 @@ export class BM25Index {
     const minScore = opts?.minScore ?? 0;
 
     if (this.documents.size === 0 || queryTokens.length === 0) return [];
+
+    // O21: Check query cache (only for non-decay queries)
+    const cacheKey = opts?.applyDecay ? undefined : [...queryTokens].sort().join("\u0001");
+    if (cacheKey !== undefined) {
+      const cached = this.queryCache.get(cacheKey);
+      if (cached) return cached;
+    }
 
     this.rebuildIdfCache();
 
@@ -207,6 +219,15 @@ export class BM25Index {
         }
       }
       limited.sort((a, b) => b.score - a.score);
+    }
+
+    // O21: Store in LRU cache (non-decay only)
+    if (cacheKey !== undefined) {
+      if (this.queryCache.size >= BM25Index.CACHE_SIZE) {
+        const firstKey = this.queryCache.keys().next().value;
+        if (firstKey !== undefined) this.queryCache.delete(firstKey);
+      }
+      this.queryCache.set(cacheKey, limited);
     }
 
     return limited;

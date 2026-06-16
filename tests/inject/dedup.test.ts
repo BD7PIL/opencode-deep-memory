@@ -90,4 +90,57 @@ describe("dedupByJaccard", () => {
   it("single item always kept", () => {
     expect(dedupByJaccard(["only"], (s) => s)).toEqual(["only"]);
   });
+
+  it("O23: inverted index produces same results as pairwise for small input", () => {
+    const items = [
+      "the quick brown fox jumps over the lazy dog",
+      "the quick brown fox jumps over the lazy dog again",
+      "completely different text about something else",
+      "another unique entry here",
+    ];
+    const result = dedupByJaccard(items, (s) => s);
+    // First two are near-duplicates (Jaccard > 0.85), third and fourth are unique
+    expect(result).toHaveLength(3);
+    expect(result[0]).toBe("the quick brown fox jumps over the lazy dog");
+    expect(result[1]).toBe("completely different text about something else");
+    expect(result[2]).toBe("another unique entry here");
+  });
+
+  it("O23: handles entries with no shared tokens efficiently", () => {
+    const items = [
+      "aaa bbb ccc",
+      "ddd eee fff",
+      "ggg hhh iii",
+      "jjj kkk lll",
+    ];
+    // No shared tokens → no comparisons needed → all kept
+    const result = dedupByJaccard(items, (s) => s);
+    expect(result).toHaveLength(4);
+  });
+
+  it("O23: handles many near-duplicate entries", () => {
+    // Create 20 entries where first 15 are near-duplicates of the first
+    const base = "this is a common base text with many shared words";
+    const items = [
+      base,
+      ...Array.from({ length: 14 }, (_, i) => `${base} extra${i}`),
+      "completely different text alpha",
+      "another different text beta",
+      "third unique text gamma",
+      "fourth unique text delta",
+      "fifth unique text epsilon",
+    ];
+    const result = dedupByJaccard(items, (s) => s);
+    // First entry kept, 14 near-duplicates removed, 5 unique kept
+    expect(result).toHaveLength(6);
+    expect(result[0]).toBe(base);
+  });
+
+  it("O23: respects custom threshold with inverted index", () => {
+    const items = ["a b c d", "a b c e", "x y z"];
+    // Default threshold 0.85 → keeps all (Jaccard of first two: 3/5=0.6)
+    expect(dedupByJaccard(items, (s) => s)).toHaveLength(3);
+    // Threshold 0.5 → first two are duplicates (0.6 > 0.5)
+    expect(dedupByJaccard(items, (s) => s, 0.5)).toHaveLength(2);
+  });
 });

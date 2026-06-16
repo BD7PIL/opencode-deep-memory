@@ -1,6 +1,5 @@
 import { computeImportance } from "./importance.js";
 import { renderTier, type Tier } from "./tier-renderer.js";
-import { estimateTokens } from "../shared/tokens.js";
 
 export interface SearchResultLike {
   score: number;
@@ -18,14 +17,21 @@ export interface AllocatedEntry {
   tokens: number;
 }
 
+interface EntryWithImportance {
+  result: SearchResultLike;
+  type: string;
+  fusedImportance: number;
+}
+
+const TIER_COST: Record<number, number> = { 1: 200, 2: 60, 3: 25, 4: 15 };
+
 /**
- * Single-pass greedy budget allocation with BM25 × importance fusion.
+ * Two-phase tier-first budget allocation with BM25 × importance fusion.
  *
- * 1. Compute BM25 percentile thresholds (top 20%, top 50%)
- * 2. Fuse base importance + BM25 boost per result
- * 3. Sort by fused importance desc
- * 4. Greedy: try P1→P2→P3→P4→break
- * 5. Render at allocated tier, subtract tokens
+ * Phase 1 (Floor): Render all entries at P4 (15 tokens). If total P4 cost
+ *   exceeds budget, select top-N by importance and drop the rest.
+ * Phase 2 (Upgrade): With remaining budget, greedily upgrade the highest
+ *   importance entries through P4→P3→P2→P1.
  */
 export function allocateAndRender(
   results: SearchResultLike[],
@@ -37,13 +43,13 @@ export function allocateAndRender(
 ): AllocatedEntry[] {
   if (results.length === 0) return [];
 
-  // 1. Compute BM25 percentile boost
+  // Compute BM25 percentile boost
   const sortedScores = results.map((r) => r.score).sort((a, b) => b - a);
   const top20 = sortedScores[Math.floor(sortedScores.length * 0.2)] ?? 0;
   const top50 = sortedScores[Math.floor(sortedScores.length * 0.5)] ?? 0;
 
-  // 2. Compute fused importance for each
-  const withImportance = results.map((r) => {
+  // Compute fused importance for each
+  const withImportance: EntryWithImportance[] = results.map((r) => {
     const type = opts.typeOf?.(r) ?? inferType(r.heading);
     const ageDays = opts.ageDays?.(r) ?? 0;
     const base = computeImportance({
@@ -58,47 +64,53 @@ export function allocateAndRender(
     return { result: r, type, fusedImportance: base + boost };
   });
 
-  // 3. Sort by fused importance descending
+  // Sort by fused importance descending
   withImportance.sort((a, b) => b.fusedImportance - a.fusedImportance);
 
-  // 4. Single-pass greedy allocation
-  let remaining = opts.budget;
-  const allocated: AllocatedEntry[] = [];
+  // Phase 1: Floor at P4
+  const maxAtP4 = Math.floor(opts.budget / TIER_COST[4]);
+  const selected = withImportance.slice(0, maxAtP4);
+  let remaining = opts.budget - selected.length * TIER_COST[4];
 
-  for (const item of withImportance) {
-    if (remaining <= 0) break;
-
-    const content = item.result.snippet;
-    const fullCost = estimateTokens(content);
-
-    let tier: Tier;
-    if (fullCost <= remaining && item.fusedImportance >= 80) {
-      tier = 1;
-    } else if (remaining > 60) {
-      tier = 2;
-    } else if (remaining > 25) {
-      tier = 3;
-    } else if (remaining > 15) {
-      tier = 4;
-    } else {
-      break;
-    }
-
-    const rendered = renderTier(content, item.type, item.result.heading, tier);
-    const tokens = estimateTokens(rendered);
-
-    allocated.push({
-      content,
+  const allocations: AllocatedEntry[] = selected.map((item) => {
+    const rendered = renderTier(item.result.snippet, item.type, item.result.heading, 4);
+    return {
+      content: item.result.snippet,
       type: item.type,
       heading: item.result.heading,
-      tier,
+      tier: 4 as Tier,
       rendered,
-      tokens,
-    });
-    remaining -= tokens;
+      tokens: TIER_COST[4],
+    };
+  });
+
+  // Phase 2: Greedy upgrade by importance (using fixed tier cost differences)
+  for (let i = 0; i < allocations.length; i++) {
+    const alloc = allocations[i]!;
+    // Try P4→P3 (costs 10 more tokens)
+    if (remaining >= TIER_COST[3] - TIER_COST[4] && alloc.tier === 4) {
+      alloc.tier = 3;
+      alloc.rendered = renderTier(alloc.content, alloc.type, alloc.heading, 3);
+      alloc.tokens = TIER_COST[3];
+      remaining -= TIER_COST[3] - TIER_COST[4];
+    }
+    // Try P3→P2 (costs 35 more tokens)
+    if (remaining >= TIER_COST[2] - TIER_COST[3] && alloc.tier === 3) {
+      alloc.tier = 2;
+      alloc.rendered = renderTier(alloc.content, alloc.type, alloc.heading, 2);
+      alloc.tokens = TIER_COST[2];
+      remaining -= TIER_COST[2] - TIER_COST[3];
+    }
+    // Try P2→P1 (costs 140 more tokens)
+    if (remaining >= TIER_COST[1] - TIER_COST[2] && alloc.tier === 2) {
+      alloc.tier = 1;
+      alloc.rendered = renderTier(alloc.content, alloc.type, alloc.heading, 1);
+      alloc.tokens = TIER_COST[1];
+      remaining -= TIER_COST[1] - TIER_COST[2];
+    }
   }
 
-  return allocated;
+  return allocations;
 }
 
 function inferType(heading: string): string {

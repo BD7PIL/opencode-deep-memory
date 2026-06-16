@@ -43,6 +43,15 @@ Steps:
 
 IMPORTANT: Only distill workflows related to the PROJECT DOMAIN (e.g., code patterns, testing procedures, deployment steps). Do NOT distill meta-patterns about the memory plugin itself (e.g., "user says 记住 → call memory_store"). Those are plugin internals, not reusable project knowledge.
 
+VERIFICATION STEP (before storing each finding):
+For each memory that references a specific source file:
+1. Use the read tool to check the file still exists and contains the referenced symbol
+2. If the file no longer exists or the referenced function/class/variable was removed/renamed:
+   - Call memory_forget to remove the stale entry
+   - Do NOT store the new finding
+3. Only store memories that reference files and symbols that STILL EXIST in the codebase
+4. Limit verification to 5 files maximum (do not read more than 5 files during this distill cycle)
+
 Distillation is about reusable patterns, not one-off actions. Skip anything that happened only once.
 
 When done, output a brief summary: "Distilled N workflow candidates."`;

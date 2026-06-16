@@ -31,6 +31,8 @@ import { createMemoryTools } from "./tools/index.js";
 import { createCompactingHandler } from "./hooks/compacting.js";
 import { createMessagesTransformHandler } from "./hooks/messages-transform.js";
 import { runEnrichment } from "./extract/enrich.js";
+import { RepoMapTracker } from "./repomap/tracker.js";
+import { getLanguage } from "./repomap/extractor.js";
 
 export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
   const cached = (globalThis as Record<string, unknown>)["__deepMemoryCachedHooks"] as Hooks | undefined;
@@ -53,6 +55,8 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
     projectPath,
     logger: logger.for("search"),
   });
+
+  const tracker = new RepoMapTracker();
 
   try {
     input.client.config.get().then((configResult) => {
@@ -83,7 +87,7 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
     });
   });
 
-  const memoryTools = createMemoryTools(searchService);
+  const memoryTools = createMemoryTools(searchService, { projectPath });
 
   const hooks: Hooks = {
     "chat.params": createChatParamsHandler(state, logger.for("chat-params")),
@@ -99,6 +103,7 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
       projectPath,
       searchService,
       logger.for("system-transform"),
+      tracker,
     ),
 
     event: async ({ event }) => {
@@ -228,11 +233,22 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
 
     tool: memoryTools,
 
+    "tool.execute.after": async (input, output) => {
+      if (input.tool !== "read") return;
+      const filePath = (input.args as { path?: string; filePath?: string })?.path
+        ?? (input.args as { filePath?: string })?.filePath;
+      if (!filePath) return;
+      const lang = getLanguage(filePath);
+      if (!lang) return;
+      tracker.recordRead(filePath, output.output || "");
+    },
+
     "experimental.session.compacting": createCompactingHandler({
       client: input.client,
       state,
       projectPath,
       logger: logger.for("compacting"),
+      tracker,
     }),
 
     "experimental.chat.messages.transform": createMessagesTransformHandler(

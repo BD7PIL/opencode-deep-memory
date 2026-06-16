@@ -48,23 +48,24 @@ export interface Budget {
   toolPrompt: number;
   memorySummary: number;
   checkpointSummary: number;
+  repomap: number;
 }
 
 const BUDGET_TABLE: Record<AgentTier, Record<string, Budget>> = {
   main: {
-    normal: { total: 800, toolPrompt: 80, memorySummary: 500, checkpointSummary: 220 },
-    "post-compaction": { total: 3000, toolPrompt: 80, memorySummary: 1500, checkpointSummary: 1420 },
-    "post-resume": { total: 3000, toolPrompt: 80, memorySummary: 1500, checkpointSummary: 1420 },
+    normal: { total: 800, toolPrompt: 80, memorySummary: 400, checkpointSummary: 220, repomap: 100 },
+    "post-compaction": { total: 3000, toolPrompt: 80, memorySummary: 1200, checkpointSummary: 1420, repomap: 300 },
+    "post-resume": { total: 3000, toolPrompt: 80, memorySummary: 1200, checkpointSummary: 1420, repomap: 300 },
   },
   "deep-reasoning": {
-    normal: { total: 400, toolPrompt: 80, memorySummary: 240, checkpointSummary: 80 },
-    "post-compaction": { total: 800, toolPrompt: 80, memorySummary: 500, checkpointSummary: 220 },
-    "post-resume": { total: 400, toolPrompt: 80, memorySummary: 240, checkpointSummary: 80 },
+    normal: { total: 400, toolPrompt: 80, memorySummary: 240, checkpointSummary: 80, repomap: 0 },
+    "post-compaction": { total: 800, toolPrompt: 80, memorySummary: 500, checkpointSummary: 220, repomap: 0 },
+    "post-resume": { total: 400, toolPrompt: 80, memorySummary: 240, checkpointSummary: 80, repomap: 0 },
   },
   "tool-subagent": {
-    normal: { total: 80, toolPrompt: 80, memorySummary: 0, checkpointSummary: 0 },
-    "post-compaction": { total: 80, toolPrompt: 80, memorySummary: 0, checkpointSummary: 0 },
-    "post-resume": { total: 80, toolPrompt: 80, memorySummary: 0, checkpointSummary: 0 },
+    normal: { total: 80, toolPrompt: 80, memorySummary: 0, checkpointSummary: 0, repomap: 0 },
+    "post-compaction": { total: 80, toolPrompt: 80, memorySummary: 0, checkpointSummary: 0, repomap: 0 },
+    "post-resume": { total: 80, toolPrompt: 80, memorySummary: 0, checkpointSummary: 0, repomap: 0 },
   },
 };
 

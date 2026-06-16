@@ -1,35 +1,58 @@
 /**
- * Deduplicate items by Jaccard similarity of their tokenized text.
+ * Deduplicate items by Jaccard similarity using an inverted index.
  *
- * Greedy: iterate items in order, skip if similar (above threshold) to any
- * already-kept item. Default threshold 0.85 catches near-duplicates only.
+ * Instead of O(n²) pairwise comparisons, builds a token→entryIndex map
+ * and only compares entries that share at least one token. Uses the same
+ * Jaccard > threshold (default 0.85) for near-duplicate detection.
  */
 export function dedupByJaccard<T>(
   items: T[],
   getText: (item: T) => string,
   threshold = 0.85,
 ): T[] {
-  const result: T[] = [];
-  const tokenSets: Set<string>[] = [];
+  if (items.length === 0) return [];
 
-  for (const item of items) {
-    const tokens = new Set(tokenize(getText(item)));
-    let isDup = false;
+  // Build token sets per item
+  const tokenSets: Set<string>[] = items.map((item) => new Set(tokenize(getText(item))));
 
-    for (const existing of tokenSets) {
-      if (jaccardSimilarity(tokens, existing) > threshold) {
-        isDup = true;
-        break;
+  // Build inverted index: token → list of item indices
+  const inverted = new Map<string, number[]>();
+  for (let i = 0; i < tokenSets.length; i++) {
+    for (const token of tokenSets[i]!) {
+      let list = inverted.get(token);
+      if (!list) {
+        list = [];
+        inverted.set(token, list);
       }
-    }
-
-    if (!isDup) {
-      result.push(item);
-      tokenSets.push(tokens);
+      list.push(i);
     }
   }
 
-  return result;
+  // Track which items are duplicates
+  const isDuplicate = new Set<number>();
+  const compared = new Set<string>();
+
+  // Only compare entries sharing at least one token
+  for (const indices of inverted.values()) {
+    for (let a = 0; a < indices.length; a++) {
+      const i = indices[a]!;
+      if (isDuplicate.has(i)) continue;
+      for (let b = a + 1; b < indices.length; b++) {
+        const j = indices[b]!;
+        if (isDuplicate.has(j)) continue;
+
+        const key = i < j ? `${i}-${j}` : `${j}-${i}`;
+        if (compared.has(key)) continue;
+        compared.add(key);
+
+        if (jaccardSimilarity(tokenSets[i]!, tokenSets[j]!) > threshold) {
+          isDuplicate.add(j);
+        }
+      }
+    }
+  }
+
+  return items.filter((_, i) => !isDuplicate.has(i));
 }
 
 function tokenize(text: string): string[] {

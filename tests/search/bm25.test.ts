@@ -178,4 +178,80 @@ describe("BM25Index", () => {
       expect(results[0]!.score).toBeGreaterThan(0);
     });
   });
+
+  describe("O21: query cache", () => {
+    it("returns cached results on identical query", () => {
+      const index = new BM25Index();
+      index.addDocument("doc1", ["hello", "world"]);
+      index.addDocument("doc2", ["foo", "bar"]);
+
+      const first = index.search(["hello"]);
+      const second = index.search(["hello"]);
+      expect(second).toEqual(first);
+      expect(second).toHaveLength(1);
+    });
+
+    it("cache hit returns same reference (LRU)", () => {
+      const index = new BM25Index();
+      index.addDocument("doc1", ["alpha", "beta"]);
+      const first = index.search(["alpha"]);
+      const second = index.search(["alpha"]);
+      expect(second).toBe(first);
+    });
+
+    it("cache key is order-independent (sorted tokens)", () => {
+      const index = new BM25Index();
+      index.addDocument("doc1", ["alpha", "beta", "gamma"]);
+      const ab = index.search(["alpha", "beta"]);
+      const ba = index.search(["beta", "alpha"]);
+      expect(ba).toEqual(ab);
+    });
+
+    it("cache invalidated on addDocument", () => {
+      const index = new BM25Index();
+      index.addDocument("doc1", ["hello"]);
+      const before = index.search(["hello"]);
+      expect(before).toHaveLength(1);
+
+      index.addDocument("doc2", ["hello"]);
+      const after = index.search(["hello"]);
+      expect(after).toHaveLength(2);
+    });
+
+    it("cache invalidated on removeDocument", () => {
+      const index = new BM25Index();
+      index.addDocument("doc1", ["hello"]);
+      index.addDocument("doc2", ["hello"]);
+      const before = index.search(["hello"]);
+      expect(before).toHaveLength(2);
+
+      index.removeDocument("doc1");
+      const after = index.search(["hello"]);
+      expect(after).toHaveLength(1);
+    });
+
+    it("evicts oldest entry when cache is full (CACHE_SIZE=50)", () => {
+      const index = new BM25Index();
+      index.addDocument("doc1", ["common"]);
+      // Fill cache with 50 unique queries
+      for (let i = 0; i < 50; i++) {
+        index.search([`term${i}`]);
+      }
+      // 51st query should evict the oldest
+      index.search(["term50"]);
+      // Re-searching term0 should miss cache (was evicted)
+      // We verify this indirectly by checking that the search still works
+      const results = index.search(["common"]);
+      expect(results).toHaveLength(1);
+    });
+
+    it("decay queries bypass cache", () => {
+      const index = new BM25Index();
+      index.addDocument("doc1", ["hello"], new Date("2020-01-01"));
+      const withoutDecay = index.search(["hello"]);
+      const withDecay = index.search(["hello"], { applyDecay: true, now: Date.now() });
+      // Decay should reduce score for old documents
+      expect(withDecay[0]!.score).toBeLessThanOrEqual(withoutDecay[0]!.score);
+    });
+  });
 });

@@ -1,0 +1,16 @@
+src/
+tests/
+scripts/
+.github/
+*.test.ts
+*.benchmark.ts
+vitest.config.ts
+tsconfig.json
+tsup.config.ts
+DESIGN.md
+IMPLEMENTATION-v0.2.md
+OPTIMIZATION-PLAN-v0.3.md
+DESIGN-SPEC-VERIFICATION.md
+FINAL-REPORT.md
+.gitignore
+.deep-memory-debug.log

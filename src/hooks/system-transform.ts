@@ -9,6 +9,7 @@ import type { Hooks } from "@opencode-ai/plugin";
 import type { PluginState } from "./shared-state.js";
 import type { Logger } from "../shared/log.js";
 import type { SearchService } from "../search/service.js";
+import type { RepoMapTracker } from "../repomap/tracker.js";
 import { composeSystemPayload } from "../inject/system-payload.js";
 import { classifyAgent } from "../inject/agent-budget.js";
 
@@ -20,6 +21,7 @@ export function createSystemTransformHandler(
   projectPath: string,
   searchService?: SearchService,
   logger?: Logger,
+  tracker?: RepoMapTracker,
 ): NonNullable<Hooks["experimental.chat.system.transform"]> {
   return async (input, output) => {
     if (!input.sessionID) {
@@ -50,6 +52,7 @@ export function createSystemTransformHandler(
       searchService,
       userQuery,
       logger,
+      tracker,
     });
 
     if (stable) {

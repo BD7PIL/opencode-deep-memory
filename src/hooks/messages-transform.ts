@@ -12,6 +12,9 @@ import type { Logger } from "../shared/log.js";
 
 const KEEP_RECENT = 8;
 
+/** C1: First N messages are never touched (system prompt + first user + first assistant). */
+const PROTECTED_HEAD = 3;
+
 const SYSTEM_INJECTION_PATTERNS = [
   /^$/,
   /^<!-- OMO_INTERNAL_INITIATOR -->$/,
@@ -53,6 +56,62 @@ function isSystemInjected(msg: { parts: unknown[] }): boolean {
 }
 
 /**
+ * A3: Defensive repair — ensure assistant messages with tool_use parts have
+ * matching tool_result parts in subsequent messages. If a tool_result is
+ * missing (e.g., due to aggressive future stripping), inject a synthetic one.
+ *
+ * Current implementation already skips messages containing tool parts, so this
+ * is a safety net for forward-compatibility.
+ */
+function repairOrphanedToolCalls(
+  messages: Array<{ info: { role: string }; parts: unknown[] }>,
+): void {
+  // Collect all tool_use IDs from assistant messages
+  const toolUseIds = new Set<string>();
+  for (const msg of messages) {
+    if (msg.info.role !== "assistant") continue;
+    for (const part of msg.parts) {
+      if (typeof part !== "object" || part === null) continue;
+      const p = part as Record<string, unknown>;
+      if (p["type"] === "tool_use" && typeof p["id"] === "string") {
+        toolUseIds.add(p["id"]);
+      }
+    }
+  }
+
+  if (toolUseIds.size === 0) return;
+
+  // Collect all tool_result IDs from user/tool-result messages
+  const toolResultIds = new Set<string>();
+  for (const msg of messages) {
+    for (const part of msg.parts) {
+      if (typeof part !== "object" || part === null) continue;
+      const p = part as Record<string, unknown>;
+      if (p["type"] === "tool_result" && typeof p["tool_use_id"] === "string") {
+        toolResultIds.add(p["tool_use_id"]);
+      }
+    }
+  }
+
+  // Find orphaned tool_use IDs (no matching tool_result)
+  for (const msg of messages) {
+    if (msg.info.role !== "assistant") continue;
+    for (const part of msg.parts) {
+      if (typeof part !== "object" || part === null) continue;
+      const p = part as Record<string, unknown>;
+      if (p["type"] === "tool_use" && typeof p["id"] === "string") {
+        if (!toolResultIds.has(p["id"])) {
+          // Convert orphaned tool_use to a synthetic tool result to prevent API errors
+          p["type"] = "tool";
+          p["state"] = { status: "ok" };
+          p["text"] = "[context-stripped]";
+        }
+      }
+    }
+  }
+}
+
+/**
  * Create a messages.transform handler for content compression.
  *
  * Operates only on assistant messages outside the protected tail (last 8).
@@ -66,6 +125,9 @@ export function createMessagesTransformHandler(
     const messages = output.messages;
     if (messages.length <= KEEP_RECENT) return;
 
+    // C1: Skip stripping entirely if conversation is short enough
+    if (messages.length <= KEEP_RECENT + PROTECTED_HEAD) return;
+
     const protectedTailStart = messages.length - KEEP_RECENT;
     const stats = {
       reasoning_cleared: 0,
@@ -75,7 +137,7 @@ export function createMessagesTransformHandler(
       thinking_stripped: 0,
     };
 
-    for (let i = 0; i < protectedTailStart; i++) {
+    for (let i = PROTECTED_HEAD; i < protectedTailStart; i++) {
       const msg = messages[i];
       if (!msg?.parts?.length) continue;
 
@@ -146,6 +208,11 @@ export function createMessagesTransformHandler(
         stats.system_neutralized++;
       }
     }
+
+    // A3: Defensive repair — scan for orphaned tool_use parts.
+    // Current code already skips messages with tool parts, so this is a
+    // safety net in case future changes allow tool-part stripping.
+    repairOrphanedToolCalls(messages);
 
     if (Object.values(stats).some(v => v > 0)) {
       logger?.debug("messages.transform: stripped", stats);

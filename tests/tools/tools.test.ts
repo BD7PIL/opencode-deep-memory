@@ -187,4 +187,30 @@ describe("createMemoryTools", () => {
     expect(tools.memory_store).toBeDefined();
     expect(tools.memory_forget).toBeDefined();
   });
+
+  it("backward compatible: works without opts parameter", () => {
+    const service = mockSearchService();
+    const tools = createMemoryTools(service);
+    expect(Object.keys(tools)).toEqual([
+      "memory_search",
+      "memory_store",
+      "memory_forget",
+      "memory_expand",
+    ]);
+  });
+
+  it("includes memory_expand when projectPath is provided", () => {
+    const service = mockSearchService();
+    const tools = createMemoryTools(service, {
+      projectPath: "/test/project",
+    });
+    expect(tools).toHaveProperty("memory_expand");
+    expect((tools as Record<string, { description: string }>).memory_expand.description).toContain("Expand compressed context");
+  });
+
+  it("memory_expand is always present (even without opts)", () => {
+    const service = mockSearchService();
+    const tools = createMemoryTools(service, {});
+    expect(tools).toHaveProperty("memory_expand");
+  });
 });

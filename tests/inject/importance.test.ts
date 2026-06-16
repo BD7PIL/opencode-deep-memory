@@ -77,4 +77,57 @@ describe("computeImportance", () => {
       ).toBeGreaterThanOrEqual(1);
     });
   });
+
+  describe("Aider-style multipliers (C2)", () => {
+    it("demotes private/internal entries (content starts with _) by 0.3", () => {
+      const base = computeImportance({ type: "fact", ageDays: 60, notesOccurrences: 0, searchHits: 0 });
+      const priv = computeImportance({ type: "fact", ageDays: 60, notesOccurrences: 0, searchHits: 0, content: "_internalHelper" });
+      // fact=50, *0.3 = 15
+      expect(base).toBe(50);
+      expect(priv).toBe(15);
+    });
+
+    it("demotes private/internal entries (heading starts with _) by 0.3", () => {
+      const priv = computeImportance({ type: "fact", ageDays: 60, notesOccurrences: 0, searchHits: 0, heading: "_privateSection" });
+      // fact=50, *0.3 = 15
+      expect(priv).toBe(15);
+    });
+
+    it("promotes long entries (content >= 50 chars) by 1.3", () => {
+      const base = computeImportance({ type: "fact", ageDays: 60, notesOccurrences: 0, searchHits: 0 });
+      const longContent = "x".repeat(50);
+      const long = computeImportance({ type: "fact", ageDays: 60, notesOccurrences: 0, searchHits: 0, content: longContent });
+      // fact=50, *1.3 = 65
+      expect(base).toBe(50);
+      expect(long).toBe(65);
+    });
+
+    it("demotes generic headings (containing common words) by 0.5", () => {
+      const base = computeImportance({ type: "decision", ageDays: 60, notesOccurrences: 0, searchHits: 0 });
+      const generic = computeImportance({ type: "decision", ageDays: 60, notesOccurrences: 0, searchHits: 0, heading: "test utilities" });
+      // decision=70, *0.5 = 35
+      expect(base).toBe(70);
+      expect(generic).toBe(35);
+    });
+
+    it("applies multiple multipliers together", () => {
+      // private + long + generic: 50 * 0.3 * 1.3 * 0.5 = 9.75 → rounded to 10
+      const result = computeImportance({
+        type: "fact",
+        ageDays: 60,
+        notesOccurrences: 0,
+        searchHits: 0,
+        content: "_privateFunctionWithALongNameThatExceedsFiftyCharactersXX",
+        heading: "test helper",
+      });
+      expect(result).toBe(10);
+    });
+
+    it("no multipliers when content/heading not provided (backward compat)", () => {
+      const withDefaults = computeImportance({ type: "fact", ageDays: 60, notesOccurrences: 0, searchHits: 0 });
+      const withEmpty = computeImportance({ type: "fact", ageDays: 60, notesOccurrences: 0, searchHits: 0, content: "", heading: "" });
+      expect(withDefaults).toBe(50);
+      expect(withEmpty).toBe(50);
+    });
+  });
 });

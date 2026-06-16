@@ -77,10 +77,11 @@ async function main() {
   check("experimental.chat.messages.transform registered", typeof hooks["experimental.chat.messages.transform"] === "function");
   check("experimental.session.compacting registered", typeof hooks["experimental.session.compacting"] === "function");
   check("event registered", typeof hooks.event === "function");
-  check("tool registered with 3 tools", hooks.tool && Object.keys(hooks.tool).length === 3);
+  check("tool registered with 4 tools", hooks.tool && Object.keys(hooks.tool).length === 4);
   check("memory_search tool present", !!hooks.tool.memory_search);
   check("memory_store tool present", !!hooks.tool.memory_store);
   check("memory_forget tool present", !!hooks.tool.memory_forget);
+  check("memory_expand tool present", !!hooks.tool.memory_expand);
 
   console.log();
   console.log("--- Hook: chat.params ---");

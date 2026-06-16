@@ -16,6 +16,8 @@ import { classifyAgent, budgetFor } from "./agent-budget.js";
 import { budgetedRead } from "./budgeted-read.js";
 import { allocateAndRender } from "./budget-allocator.js";
 import { dedupByJaccard } from "./dedup.js";
+import type { RepoMapTracker } from "../repomap/tracker.js";
+import { formatRepoMap } from "../repomap/injector.js";
 
 const TOOL_HINT =
   "Memory tools available: memory_search, memory_store, memory_forget. Guidelines: (1) Use memory_search to recall past decisions before re-deciding. (2) After encountering a tool error and fixing it, use memory_store with type=\"gotcha\" to save the error+fix pair. (3) When the user states a constraint or rule, use memory_store with type=\"constraint\".";
@@ -28,12 +30,13 @@ export interface ComposeSystemPayloadOpts {
   searchService?: SearchService;
   userQuery?: string;
   logger?: Logger;
+  tracker?: RepoMapTracker;
 }
 
 export async function composeSystemPayload(
   opts: ComposeSystemPayloadOpts,
 ): Promise<{ stable: string; volatile: string }> {
-  const { state, sessionID, projectPath, mode, searchService, userQuery, logger } = opts;
+  const { state, sessionID, projectPath, mode, searchService, userQuery, logger, tracker } = opts;
 
   const agent = sessionID ? state.agentOf(sessionID) : undefined;
   const tier = classifyAgent(agent);
@@ -91,6 +94,14 @@ export async function composeSystemPayload(
   if (checkpointContent) {
     volatile += `\n<last-checkpoint>\n${checkpointContent}\n</last-checkpoint>`;
   }
+
+  if (tracker && budget.repomap > 0) {
+    const repomapEntries = tracker.getTopSymbols(budget.repomap);
+    if (repomapEntries.length > 0) {
+      volatile += "\n" + formatRepoMap(repomapEntries);
+    }
+  }
+
   volatile += `\n</deep-memory-volatile>`;
 
   logger?.debug("composeSystemPayload", {

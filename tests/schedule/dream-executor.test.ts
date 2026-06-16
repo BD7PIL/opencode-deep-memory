@@ -127,4 +127,23 @@ describe("runDream", () => {
       list: true,
     });
   });
+
+  it("DREAM_PROMPT_TEMPLATE contains VERIFICATION STEP", async () => {
+    const { DREAM_PROMPT_TEMPLATE } = await import(
+      "../../src/schedule/dream-executor.js"
+    );
+    expect(DREAM_PROMPT_TEMPLATE).toContain("VERIFICATION STEP");
+    expect(DREAM_PROMPT_TEMPLATE).toContain(
+      "read tool to check the file still exists",
+    );
+  });
+
+  it("DREAM_PROMPT_TEMPLATE limits verification to 5 files", async () => {
+    const { DREAM_PROMPT_TEMPLATE } = await import(
+      "../../src/schedule/dream-executor.js"
+    );
+    expect(DREAM_PROMPT_TEMPLATE).toContain(
+      "Limit verification to 5 files maximum",
+    );
+  });
 });

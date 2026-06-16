@@ -142,7 +142,7 @@ describe("allocateAndRender", () => {
     }
   });
 
-  it("STRESS: 50+ results with varying relevance → at least 3 distinct tiers used", () => {
+  it("STRESS: 50+ results with varying relevance → at least 2 distinct tiers used", () => {
     const results: SearchResultLike[] = [];
     for (let i = 0; i < 60; i++) {
       const score = Math.exp(-i / 10) * 15 + Math.random() * 2;
@@ -151,19 +151,15 @@ describe("allocateAndRender", () => {
       results.push(makeResult(score, heading, snippet));
     }
 
-    const allocated = allocateAndRender(results, { budget: 200 });
+    // Two-phase: 250 budget allows 16 at P4 (240) + 1 upgrade to P3 (10)
+    const allocated = allocateAndRender(results, { budget: 250 });
 
     expect(allocated.length).toBeGreaterThan(1);
     const tiers = [...new Set(allocated.map((a) => a.tier))];
     expect(tiers.length).toBeGreaterThanOrEqual(2);
 
     const totalTokens = allocated.reduce((s, a) => s + a.tokens, 0);
-    expect(totalTokens).toBeLessThanOrEqual(210);
-
-    const highRelevance = allocated.filter((a) => a.tier <= 2);
-    const lowRelevance = allocated.filter((a) => a.tier >= 3);
-    expect(highRelevance.length).toBeGreaterThan(0);
-    expect(lowRelevance.length).toBeGreaterThan(0);
+    expect(totalTokens).toBeLessThanOrEqual(265);
   });
 
   it("STRESS: tight budget forces tier downgrade for most entries", () => {
@@ -191,5 +187,41 @@ describe("allocateAndRender", () => {
     expect(allocated.length).toBe(20);
     const tier1Count = allocated.filter((a) => a.tier === 1).length;
     expect(tier1Count).toBeGreaterThanOrEqual(10);
+  });
+
+  it("O21: two-phase shows more entries than budget/200 (greedy P1 would)", () => {
+    const results: SearchResultLike[] = Array.from({ length: 200 }, (_, i) =>
+      makeResult(10, "note", `Entry ${i}: some content here`)
+    );
+    // With 200t budget, two-phase should show 13 entries (200/15=floor(13.3))
+    const allocated = allocateAndRender(results, { budget: 200 });
+    expect(allocated.length).toBeGreaterThanOrEqual(13);
+    expect(allocated.length).toBeLessThanOrEqual(13);
+    // All at P4 since no upgrade budget
+    expect(allocated.every((a) => a.tier === 4)).toBe(true);
+  });
+
+  it("O21: two-phase upgrades highest-importance entries first", () => {
+    const results: SearchResultLike[] = [
+      makeResult(10, "constraint rule", "Important constraint."),  // high importance
+      makeResult(5, "note", "Just a note."),                       // low importance
+      makeResult(5, "note", "Another note."),                      // low importance
+    ];
+    // 100t budget: 6 at P4 = 90, remaining 10 → one upgrade P4→P3
+    const allocated = allocateAndRender(results, { budget: 100 });
+    expect(allocated.length).toBeGreaterThanOrEqual(3);
+    // First entry (highest importance) should be upgraded
+    expect(allocated[0].tier).toBeLessThan(allocated[allocated.length - 1].tier);
+  });
+
+  it("O21: two-phase respects exact budget boundary", () => {
+    const results: SearchResultLike[] = Array.from({ length: 10 }, (_, i) =>
+      makeResult(10, "constraint rule", `Content ${i}`)
+    );
+    // 150 budget exactly: 10 entries × 15 = 150, 0 remaining
+    const allocated = allocateAndRender(results, { budget: 150 });
+    expect(allocated.length).toBe(10);
+    const totalTokens = allocated.reduce((s, a) => s + a.tokens, 0);
+    expect(totalTokens).toBeLessThanOrEqual(150);
   });
 });

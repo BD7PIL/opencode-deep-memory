@@ -17,6 +17,7 @@ export interface RenderArgs {
   sessionID: string;
   tokenEstimate: number;
   result: HeuristicResult;
+  foldedContext?: string;
 }
 
 /**
@@ -78,6 +79,12 @@ export function renderCheckpoint(args: RenderArgs): string {
     for (const fc of result.fileChanges) {
       lines.push(`- ${fc.path}: ${fc.operation}`);
     }
+    lines.push("");
+  }
+
+  if (args.foldedContext) {
+    lines.push("## Folded File Context");
+    lines.push(args.foldedContext);
     lines.push("");
   }
 

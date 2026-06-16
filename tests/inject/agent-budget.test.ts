@@ -61,8 +61,9 @@ describe("budgetFor", () => {
       expect(budget).toEqual({
         total: 800,
         toolPrompt: 80,
-        memorySummary: 500,
+        memorySummary: 400,
         checkpointSummary: 220,
+        repomap: 100,
       });
     });
 
@@ -73,6 +74,7 @@ describe("budgetFor", () => {
         toolPrompt: 80,
         memorySummary: 240,
         checkpointSummary: 80,
+        repomap: 0,
       });
     });
 
@@ -83,6 +85,7 @@ describe("budgetFor", () => {
         toolPrompt: 80,
         memorySummary: 0,
         checkpointSummary: 0,
+        repomap: 0,
       });
     });
   });
@@ -93,8 +96,9 @@ describe("budgetFor", () => {
       expect(budget).toEqual({
         total: 3000,
         toolPrompt: 80,
-        memorySummary: 1500,
+        memorySummary: 1200,
         checkpointSummary: 1420,
+        repomap: 300,
       });
     });
 
@@ -105,6 +109,7 @@ describe("budgetFor", () => {
         toolPrompt: 80,
         memorySummary: 500,
         checkpointSummary: 220,
+        repomap: 0,
       });
     });
 
@@ -115,6 +120,7 @@ describe("budgetFor", () => {
         toolPrompt: 80,
         memorySummary: 0,
         checkpointSummary: 0,
+        repomap: 0,
       });
     });
   });
@@ -146,7 +152,7 @@ describe("budgetFor", () => {
     for (const tier of tiers) {
       for (const mode of modes) {
         const budget = budgetFor(tier, mode);
-        expect(budget.toolPrompt + budget.memorySummary + budget.checkpointSummary).toBe(
+        expect(budget.toolPrompt + budget.memorySummary + budget.checkpointSummary + budget.repomap).toBe(
           budget.total,
         );
       }
