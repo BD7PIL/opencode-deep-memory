@@ -99,6 +99,20 @@ Copy `.opencode/command/*.md` to your project:
 See [docs/DESIGN.md](docs/DESIGN.md) for full architecture.
 See [docs/OPTIMIZATION-PLAN-v0.3.md](docs/OPTIMIZATION-PLAN-v0.3.md) for optimization history.
 
+## Acknowledgments
+
+Built on insights from excellent projects:
+
+| Project | What we learned |
+|---------|----------------|
+| [MiMo-Code](https://github.com/XiaomiMiMo/MiMo-Code) | Deep memory integration architecture for OpenCode |
+| [Magic Context](https://github.com/cortexkit/magic-context) | m[0]/m[1] cache-stable layout, deterministic decay-curve, content stripping |
+| [Aider](https://github.com/paul-gauthier/aider) | Repo map PageRank ranking, conversation-personalized scoring |
+| [Roo Code](https://github.com/RooCodeInc/Roo-Code) | Folded file context recovery, synthetic tool result injection |
+| [Continue.dev](https://github.com/continuedev/continue) | Hybrid retrieval (embeddings + FTS + recency fusion) |
+| [OpenHands](https://github.com/All-Hands-AI/OpenHands) | Keep-first-N preservation during summarization |
+| [Plandex](https://github.com/plandex-ai/plandex) | Checkpoint-based conversation summarization |
+
 ## Development
 
 ```bash
