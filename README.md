@@ -1,161 +1,110 @@
 # opencode-deep-memory
 
-> Persistent context intelligence for [OpenCode](https://github.com/anomalyco/opencode) — cross-session memory, compaction-resilient checkpoints, context-aware injection, and deterministic content compression. Zero runtime dependencies.
+> Persistent memory, checkpoint resilience, and deterministic context compression for [OpenCode](https://github.com/anomalyco/opencode) — zero runtime dependencies.
 
-## Why?
+## What it does
 
-OpenCode sessions are stateless across restarts. Every new session starts cold — no memory of past decisions, constraints, or gotchas. Native compaction destroys conversation content irreversibly.
+OpenCode sessions are stateless. Every restart is a cold start. Native compaction destroys conversation content.
 
-**opencode-deep-memory** fixes this:
+**deep-memory** adds three layers:
 
-- **Persistent memory** — decisions, constraints, gotchas survive across sessions
-- **Cross-session resume** — new sessions automatically recall everything
-- **Compaction resilience** — checkpoint captures conversation before compaction destroys it
-- **Context compression** — strips reasoning metadata and old content without LLM calls
-- **Code structure awareness** — regex-based repo map gives the agent awareness of your codebase
+- **Remember** — decisions, constraints, gotchas survive across sessions via BM25 + CJK search
+- **Recover** — checkpoint captures conversation before compaction destroys it; resume injection recalls everything
+- **Compress** — strips reasoning metadata and old content deterministically, without LLM calls
 
-## Installation
-
-### Via npm (recommended)
+## Quick start
 
 ```jsonc
 // opencode.json
 {
   "plugin": [
     "oh-my-openagent",
-    "opencode-deep-memory",
-    "@ramtinj95/opencode-tokenscope"
+    "opencode-deep-memory"
   ]
 }
 ```
 
-OpenCode auto-installs on startup.
+OpenCode auto-installs on startup. Memory appears at `.deep-memory/` in your project root.
 
-### Via local path (development)
+## How it works
 
-```jsonc
-{
-  "plugin": [
-    "/path/to/opencode-deep-memory/dist/index.js"
-  ]
-}
+```
+                         ┌─────────────────────────────┐
+                         │     system.transform         │
+                         │   m[0] stable (cache hit)    │
+                         │   m[1] volatile (per-turn)   │
+                         │   repo map (code symbols)    │
+                         └─────────────────────────────┘
+                                     ▲
+┌──────────────┐    ┌──────────────┐ │  ┌──────────────┐
+│ chat.message │    │  chat.params │ │  │messages.tfm  │
+│ keyword→notes│    │ agent→budget │ │  │ strip old     │
+│  "记住"/"rem" │    │ main 800t    │ │  │ reasoning +   │
+│              │    │ oracle 400t  │ │  │ metadata +    │
+└──────────────┘    └──────────────┘ │  │ errors        │
+                                     │  └──────────────┘
+                      ┌──────────────┘
+                      │
+┌─────────────────────┴───────────────────────┐
+│                  event                      │
+│  session.created → resume + dream schedule  │
+│  session.idle    → enrichment               │
+│  session.compacted → checkpoint             │
+└─────────────────────────────────────────────┘
 ```
 
-## Features
+## Context compression (zero LLM)
 
-### Persistent Memory (BM25 + CJK)
+Unlike DCP (LLM summarization), we strip deterministically:
 
-- **Zero-dependency BM25 engine** with CJK bigram tokenizer (25× faster than SQLite FTS5)
-- Four tools: `memory_search`, `memory_store`, `memory_forget`, `memory_expand`
-- Project-local storage at `<project>/.deep-memory/` (version-controllable)
-
-### Adaptive Injection (m[0]/m[1] Cache-Stable)
-
-- **Stable prefix**: constraints + rules — never changes per turn → prompt cache hit
-- **Volatile suffix**: context-aware search results + repo map
-- Agent-type-aware budgets: main 800t / oracle 400t / explore 80t
-- Post-resume expansion: 3000t on first turn of new session
-
-### Deterministic Content Compression (Zero LLM)
-
-Strips from old messages (>8 turns ago, first 3 protected):
-
-| What | Savings | Why safe |
-|------|---------|----------|
+| What gets stripped | Savings | Why safe |
+|--------------------|---------|----------|
 | `reasoning_details` metadata | ~18.5% | API metadata, not model input |
-| Old reasoning text → "[cleared]" | ~24% | Conclusions already in output |
-| System-injected notifications | ~5% | Internal plumbing, no future value |
+| Old reasoning → `[cleared]` | ~24% | Conclusions already in text output |
+| System injections (`<system-reminder>`) | ~5% | Internal plumbing |
 | Tool errors >100 chars | ~2% | Old errors only need "it failed" |
-| Inline `<thinking>` tags | ~2% | Same as reasoning — process not product |
+| Inline `<thinking>` tags | ~2% | Process, not product |
 
-**Never touches**: user messages, recent 8 messages, tool calls/results.
-
-### Repo Map (Code Structure Awareness)
-
-- Regex-based symbol extraction for TypeScript, JavaScript, Python, Go, Rust, Java, C/C++, Ruby
-- Tracks files read by the agent, injects compact symbol list into system prompt
-- Ranked by recency + frequency + Aider-style multipliers (private 0.3×, long names 1.5×)
-
-### Checkpoint System
-
-- **Compacting hook** captures full conversation before native compaction
-- **5-pattern heuristic extraction**: user intents, decisions, constraints, gotchas, file changes
-- **Idle-layer LLM enrichment**: background session cross-references and refines
-- **Folded file context**: post-compaction checkpoint includes code symbols
-
-### Dream Consolidation
-
-- **Auto-dream** (7-day cycle or accumulation trigger): consolidates notes.md into MEMORY.md
-- **Key-files verification**: dream agent verifies memories against actual source files
-- **Auto-distill** (30-day cycle): packages recurring workflows into skill candidates
+**Never touches**: user messages, recent 8 messages, tool calls, tool results.
 
 ## Configuration
 
-### Environment Variables
-
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `DEEP_MEMORY_DEBUG` | (off) | `1` = debug logs, `trace` = +hook I/O dump |
-| `DEEP_MEMORY_PROJECT_SUBDIR` | `.deep-memory` | Project-local memory directory name |
-| `DEEP_MEMORY_GLOBAL_ROOT` | `~/.local/share/opencode/deep-memory` | Global memory root |
+| `DEEP_MEMORY_DEBUG` | off | `1` = debug log, `trace` = +hook I/O |
+| `DEEP_MEMORY_PROJECT_SUBDIR` | `.deep-memory` | Memory directory name |
+| `DEEP_MEMORY_GLOBAL_ROOT` | `~/.local/share/opencode/deep-memory` | Cross-project memory |
 
-### Storage Layout
-
-```
-<project>/.deep-memory/              # Project-local (visible, VCS-friendly)
-├── MEMORY.md                          # Persistent decisions/constraints/gotchas
-├── notes.md                           # Keyword captures
-├── checkpoint.md                      # Last compaction extraction
-├── .schedule.json                     # Dream/distill scheduling
-└── sessions/<sid>/checkpoint.md       # Per-session archives
-
-<globalRoot>/global/MEMORY.md          # Cross-project memory
-```
-
-## How It Works
+## Storage
 
 ```
-Session created → resume detection (3000t budget)
-                → auto-dream check (7-day cycle)
-
-Each LLM turn → chat.params (record agent)
-              → chat.message (keyword capture)
-              → system.transform (m[0] stable + m[1] volatile)
-              → messages.transform (strip old reasoning/metadata)
-              → tool.execute.after (track reads → repo map)
-
-Compaction → capture → heuristic extraction → checkpoint.md
+<project>/.deep-memory/       ← version-controllable
+├── MEMORY.md                   persistent decisions/constraints/gotchas
+├── notes.md                    keyword captures
+├── checkpoint.md               last compaction extraction
+├── .schedule.json              dream/distill state
+└── sessions/<sid>/              per-session archive
 ```
 
-## Comparison
+## Commands
 
-| Feature | DCP | Magic Context | MiMo-Code | **deep-memory** |
-|---------|-----|--------------|-----------|-----------------|
-| Search | — | SQLite + embedding | SQLite FTS5 | **BM25 + CJK** |
-| Compression | LLM (lossy) | 7 strip functions | — | **5 strip functions** |
-| LLM dependency | Required | Optional | Required | **None** |
-| Storage | Memory | SQLite | ~/.mimo/ hash | **`.deep-memory/` local** |
-| Cache stability | — | m[0]/m[1] | — | **m[0]/m[1]** |
-| Code awareness | — | — | — | **Repo Map** |
-| Runtime deps | 0 | SQLite | SQLite | **0** |
+Copy `.opencode/command/*.md` to your project:
+
+- `/checkpoint` — manually capture session state
+- `/dream` — consolidate notes into persistent memory
+- `/distill` — package recurring workflows into skills
+
+## Architecture
+
+See [docs/DESIGN.md](docs/DESIGN.md) for full architecture.
+See [docs/OPTIMIZATION-PLAN-v0.3.md](docs/OPTIMIZATION-PLAN-v0.3.md) for optimization history.
 
 ## Development
 
 ```bash
-git clone https://github.com/YOUR_GITHUB/opencode-deep-memory.git
-cd opencode-deep-memory
 npm install
-npm run verify  # typecheck + test + build + smoke
+npm run verify   # typecheck + test (363) + build + smoke (49)
 ```
-
-### Scripts
-
-| Command | Description |
-|---------|-------------|
-| `npm run build` | tsup ESM build + d.ts |
-| `npm test` | vitest (363 tests) |
-| `npm run smoke` | CLI smoke test (49 checks) |
-| `npm run verify` | typecheck + test + build + smoke |
 
 ## License
 

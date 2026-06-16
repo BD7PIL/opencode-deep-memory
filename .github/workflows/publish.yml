@@ -22,8 +22,8 @@ jobs:
 
       - run: npm install
 
-      - name: Verify (typecheck + build)
-        run: npm run typecheck && npm run build
+      - name: Verify (typecheck + test + build + smoke)
+        run: npm run verify
 
       - name: Publish
         run: npm publish --provenance --access public
