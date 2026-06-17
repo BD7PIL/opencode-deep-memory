@@ -31,6 +31,7 @@ import { createMemoryTools, createDeepExpandTool } from "./tools/index.js";
 import { createCompactingHandler } from "./hooks/compacting.js";
 import { createMessagesTransformHandler } from "./hooks/messages-transform.js";
 import { createNotifyHandler } from "./hooks/notify.js";
+import { calibrateFromCompaction, getCalibratedMaxContext } from "./compress/pressure.js";
 import { runEnrichment } from "./extract/enrich.js";
 import { RepoMapTracker } from "./repomap/tracker.js";
 import { getLanguage } from "./repomap/extractor.js";
@@ -202,6 +203,16 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
         if (event.type === "session.compacted") {
           const compactedSessionID = (event.properties as { sessionID?: string }).sessionID;
           logger.info("event session.compacted", { sessionID: compactedSessionID });
+
+          const lastTokens = state.lastInputTokens();
+          if (lastTokens > 0) {
+            calibrateFromCompaction(lastTokens);
+            logger.info("pressure calibrated", {
+              trigger: "compaction",
+              lastInputTokens: lastTokens,
+              derivedMaxContext: getCalibratedMaxContext(),
+            });
+          }
 
           try {
             const auditLogDir = projectMemoryDir(projectPath);

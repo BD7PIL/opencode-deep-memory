@@ -43,7 +43,7 @@ interface PipelineResult {
 
 export function runCompressionPipeline(ctx: PipelineContext): PipelineResult {
   const { messages, state, logger } = ctx;
-  const pressure = detectPressure(messages as Array<{ info: { role: string }; parts: unknown[] }>, ctx.modelId);
+  const pressure = detectPressure(messages as Array<{ info: { role: string }; parts: unknown[] }>);
   state.recordInputTokens(pressure.estimatedTokens);
 
   const stats: DeepCompressionStats = {

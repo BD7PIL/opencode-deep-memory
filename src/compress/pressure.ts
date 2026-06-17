@@ -4,23 +4,28 @@ export interface PressureInfo {
   level: PressureLevel;
   ratio: number;
   estimatedTokens: number;
+  maxContext: number;
 }
 
-const DEFAULT_MAX_CONTEXT = 128000;
+const FALLBACK_MAX_CONTEXT = 128000;
+const OPENCODE_COMPACTION_RATIO = 0.75;
 
 const THRESHOLDS = {
   medium: 0.30,
   high: 0.50,
 } as const;
 
-const MODEL_CONTEXT_LIMITS: Record<string, number> = {
-  "deepseek-chat": 64000,
-  "deepseek-reasoner": 64000,
-  "mimo-v2.5-pro": 128000,
-  "mimo-v2.5": 128000,
-  "claude-sonnet-4-20250514": 200000,
-  "gpt-4o": 128000,
-};
+let calibratedMaxContext = 0;
+
+export function calibrateFromCompaction(lastInputTokens: number): void {
+  if (lastInputTokens <= 0) return;
+  const derived = Math.round(lastInputTokens / OPENCODE_COMPACTION_RATIO);
+  calibratedMaxContext = derived;
+}
+
+export function getCalibratedMaxContext(): number {
+  return calibratedMaxContext;
+}
 
 export function estimateTokens(text: string): number {
   let cjk = 0;
@@ -78,8 +83,8 @@ export function extractInputTokensFromMessages(messages: Array<{ parts: unknown[
   return 0;
 }
 
-export function detectPressure(messages: Array<{ info: { role: string }; parts: unknown[] }>, modelId?: string): PressureInfo {
-  const maxContext = (modelId ? MODEL_CONTEXT_LIMITS[modelId] : undefined) ?? DEFAULT_MAX_CONTEXT;
+export function detectPressure(messages: Array<{ info: { role: string }; parts: unknown[] }>): PressureInfo {
+  const maxContext = calibratedMaxContext || FALLBACK_MAX_CONTEXT;
   const inputTokens = extractInputTokensFromMessages(messages);
   const estimated = inputTokens > 0 ? inputTokens : extractTokensFromMessages(messages);
   const ratio = Math.min(estimated / maxContext, 1.0);
@@ -89,5 +94,5 @@ export function detectPressure(messages: Array<{ info: { role: string }; parts: 
   else if (ratio >= THRESHOLDS.medium) level = "medium";
   else level = "low";
 
-  return { level, ratio, estimatedTokens: estimated };
+  return { level, ratio, estimatedTokens: estimated, maxContext };
 }
