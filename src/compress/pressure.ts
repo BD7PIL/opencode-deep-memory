@@ -1,4 +1,4 @@
-export type PressureLevel = "low" | "medium" | "high" | "critical";
+export type PressureLevel = "low" | "medium" | "high";
 
 export interface PressureInfo {
   level: PressureLevel;
@@ -9,10 +9,8 @@ export interface PressureInfo {
 const DEFAULT_MAX_CONTEXT = 128000;
 
 const THRESHOLDS = {
-  low: 0.50,
-  medium: 0.70,
-  high: 0.85,
-  critical: 0.95,
+  medium: 0.30,
+  high: 0.50,
 } as const;
 
 const MODEL_CONTEXT_LIMITS: Record<string, number> = {
@@ -87,8 +85,7 @@ export function detectPressure(messages: Array<{ info: { role: string }; parts: 
   const ratio = Math.min(estimated / maxContext, 1.0);
 
   let level: PressureLevel;
-  if (ratio >= THRESHOLDS.critical) level = "critical";
-  else if (ratio >= THRESHOLDS.high) level = "high";
+  if (ratio >= THRESHOLDS.high) level = "high";
   else if (ratio >= THRESHOLDS.medium) level = "medium";
   else level = "low";
 

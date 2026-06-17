@@ -79,10 +79,9 @@ Activates when context pressure exceeds thresholds. Inspired by
 
 | Pressure | Threshold | Actions |
 |----------|-----------|---------|
-| **low** | < 50% context | Layer 1 only |
-| **medium** | 50–70% | + tool dedup + error purge + tool output compression |
-| **high** | 70–85% | + JSON array crush + old message truncation + nudge |
-| **critical** | > 85% | + aggressive nudge (model prompted to compress) |
+| **always** | every turn | tool dedup + error purge + tool output compress + JSON crush (all reversible via CCR) |
+| **medium** | ≥ 30% context | + old message text truncation (lossy, extracts key info) |
+| **high** | ≥ 50% context | + nudge (alerts model to save important findings)
 
 What gets compressed at medium+:
 

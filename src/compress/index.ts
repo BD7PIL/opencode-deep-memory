@@ -57,29 +57,20 @@ export function runCompressionPipeline(ctx: PipelineContext): PipelineResult {
     estimatedTokens: pressure.estimatedTokens,
   };
 
-  if (pressure.level === "low") {
-    logger?.debug("compress: low pressure, skipping", { ratio: pressure.ratio.toFixed(2) });
-    return { stats };
-  }
+  // === Always run (no threshold, every turn) ===
+  stats.toolDedup = deduplicateToolOutputs(messages, state);
+  stats.errorPurge = purgeOldErrors(messages);
+  stats.toolOutputCompressed = compressOldToolOutputs(messages, state);
+  stats.jsonCrushed = crushJsonToolOutputs(messages, state);
 
-  logger?.debug("compress: pipeline running", {
-    level: pressure.level,
-    ratio: pressure.ratio.toFixed(2),
-    tokens: pressure.estimatedTokens,
-  });
-
-  if (pressure.level === "medium" || pressure.level === "high" || pressure.level === "critical") {
-    stats.toolDedup = deduplicateToolOutputs(messages, state);
-    stats.errorPurge = purgeOldErrors(messages);
-    stats.toolOutputCompressed = compressOldToolOutputs(messages, state);
-  }
-
-  if (pressure.level === "high" || pressure.level === "critical") {
-    stats.jsonCrushed = crushJsonToolOutputs(messages, state);
+  // === Lossy: only when pressure ≥ 30% ===
+  if (pressure.level === "medium" || pressure.level === "high") {
     stats.messagePruned = pruneOldMessages(messages);
   }
 
-  if (shouldInjectNudge(pressure.level, messages.length, 0)) {
+  // === Nudge: only when pressure ≥ 50% ===
+  const messagesSinceNudge = state.messagesSinceLastNudge(messages.length);
+  if (shouldInjectNudge(pressure.level, messagesSinceNudge)) {
     const lastMsg = messages[messages.length - 1];
     if (lastMsg) {
       const textParts = lastMsg.parts.filter(
@@ -89,13 +80,17 @@ export function runCompressionPipeline(ctx: PipelineContext): PipelineResult {
       if (lastTextPart && typeof lastTextPart.text === "string") {
         lastTextPart.text += buildNudgeText(pressure.level);
         stats.nudgeInjected = true;
+        state.recordNudge(messages.length);
       }
     }
   }
 
-  if (stats.toolDedup > 0 || stats.errorPurge > 0 || stats.toolOutputCompressed > 0 ||
-      stats.jsonCrushed > 0 || stats.messagePruned > 0 || stats.nudgeInjected) {
-    logger?.debug("compress: pipeline complete", { ...stats });
+  const active = stats.toolDedup > 0 || stats.errorPurge > 0 || stats.toolOutputCompressed > 0 ||
+    stats.jsonCrushed > 0 || stats.messagePruned > 0 || stats.nudgeInjected;
+  if (active) {
+    logger?.debug("compress: pipeline result", { ...stats });
+  } else {
+    logger?.debug("compress: no action needed", { ratio: pressure.ratio.toFixed(2) });
   }
   return { stats };
 }
@@ -114,6 +109,7 @@ function compressOldToolOutputs(messages: Message[], state: PluginState): number
       if (!p.state.output) continue;
       if (p.state.output === "[superseded by duplicate call]") continue;
       if (p.state.output.startsWith("[compressed")) continue;
+      if (p.state.output.includes("[ccr:")) continue;
 
       const toolName = p.tool || "unknown";
       const output = p.state.output;
@@ -144,6 +140,7 @@ function crushJsonToolOutputs(messages: Message[], state: PluginState): number {
       if (!p.state.output) continue;
       if (p.state.output.startsWith("[compressed")) continue;
       if (p.state.output.startsWith("[superseded")) continue;
+      if (p.state.output.includes("[ccr:")) continue;
 
       if (detectContentType(p.state.output) !== "json") continue;
 

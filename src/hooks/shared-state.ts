@@ -76,7 +76,7 @@ export interface DeepCompressionStats {
   messagePruned: number;
   ccrStored: number;
   nudgeInjected: boolean;
-  pressureLevel: "low" | "medium" | "high" | "critical";
+  pressureLevel: "low" | "medium" | "high";
   estimatedTokens: number;
 }
 
@@ -102,6 +102,7 @@ export class PluginState {
   private _toolSignatures = new Map<string, string>();
   private _ccrCache = new Map<string, CCRCacheEntry>();
   private _lastInputTokens = 0;
+  private _lastNudgeMessageCount = 0;
 
   agentOf(sessionID: string): string | undefined {
     return this._agents.get(sessionID);
@@ -277,6 +278,14 @@ export class PluginState {
 
   lastInputTokens(): number {
     return this._lastInputTokens;
+  }
+
+  recordNudge(messageCount: number): void {
+    this._lastNudgeMessageCount = messageCount;
+  }
+
+  messagesSinceLastNudge(currentMessageCount: number): number {
+    return currentMessageCount - this._lastNudgeMessageCount;
   }
 }
 
