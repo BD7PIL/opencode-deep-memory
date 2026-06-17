@@ -178,6 +178,7 @@ updated incrementally on writes.
 | `memory_forget` | Remove memory entries matching a query |
 | `memory_expand` | Decompress a sentinel reference to its original content |
 | `deep_expand` | Retrieve original content compressed by CCR (use `[ccr:HASH]` marker) |
+| `deep_expand` | Retrieve original content compressed by CCR (use `[ccr:HASH]` marker) |
 
 ## Commands
 
