@@ -18,7 +18,7 @@ const DEFAULT_TAIL_LINES = 20;
 const MAX_LINE_LENGTH = 500;
 
 export function compressToolOutput(toolName: string, output: string): string {
-  if (!output || output.length < 500) return output;
+  if (!output || output.length < 200) return output;
 
   const strategy = TOOL_COMPRESS_STRATEGIES[toolName];
   if (strategy) return strategy(output);

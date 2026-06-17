@@ -11,8 +11,8 @@ const FALLBACK_MAX_CONTEXT = 128000;
 const OPENCODE_COMPACTION_RATIO = 0.75;
 
 const THRESHOLDS = {
-  medium: 0.30,
-  high: 0.50,
+  medium: 0.20,
+  high: 0.40,
 } as const;
 
 let calibratedMaxContext = 0;

@@ -1,6 +1,6 @@
 import type { PressureLevel } from "./pressure.js";
 
-const NUDGE_COOLDOWN = 5;
+const NUDGE_COOLDOWN = 3;
 
 export function shouldInjectNudge(level: PressureLevel, messagesSinceLastNudge: number): boolean {
   if (level !== "high") return false;

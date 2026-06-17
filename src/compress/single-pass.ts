@@ -27,7 +27,7 @@ const PROTECTED_TOOLS = new Set([
 const NEVER_DEDUP = new Set(["read", "bash", "grep", "glob", "find", "search"]);
 
 const ERROR_PURGE_TURN_THRESHOLD = 4;
-const PROTECTED_HEAD = 2;
+const PROTECTED_HEAD_SINGLE = 2;
 
 function simpleHash(s: string): string {
   const len = s.length;
@@ -57,11 +57,11 @@ export function singlePassCompress(
   };
 
   const totalMessages = messages.length;
-  if (totalMessages <= PROTECTED_HEAD) return stats;
+  if (totalMessages <= PROTECTED_HEAD_SINGLE) return stats;
 
   const seen = new Map<string, { msgIdx: number; outputHash: string }>();
 
-  for (let i = PROTECTED_HEAD; i < totalMessages; i++) {
+  for (let i = PROTECTED_HEAD_SINGLE; i < totalMessages; i++) {
     const msg = messages[i];
     if (!msg?.parts?.length) continue;
     if (msg.info.role === "user") continue;
@@ -129,9 +129,9 @@ export function singlePassCompress(
       }
 
       // === Tool output compression ===
-      if (output.length >= 500) {
+      if (output.length >= 200) {
         const result = compressToolOutput(toolName, output);
-        if (result.length < output.length * 0.7) {
+        if (result.length < output.length * 0.85) {
           const hash = ccrStore(state, output, result, toolName, callID);
           toolState["output"] = ccrInjectMarker(result, hash);
           stats.toolOutputCompressed++;
@@ -140,9 +140,9 @@ export function singlePassCompress(
       }
 
       // === JSON crush ===
-      if (output.length >= 500 && detectContentType(output) === "json") {
+      if (output.length >= 200 && detectContentType(output) === "json") {
         const crushed = crushJsonArray(output);
-        if (crushed.length < output.length * 0.7) {
+        if (crushed.length < output.length * 0.85) {
           const hash = ccrStore(state, output, crushed, toolName, callID);
           toolState["output"] = ccrInjectMarker(crushed, hash);
           stats.jsonCrushed++;

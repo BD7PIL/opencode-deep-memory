@@ -8,8 +8,8 @@ const PROTECTED_TOOLS = new Set([
 
 const NEVER_DEDUP = new Set(["read", "bash", "grep", "glob", "find", "search"]);
 
-const KEEP_RECENT = 8;
-const PROTECTED_HEAD = 3;
+const KEEP_RECENT = 5;
+const PROTECTED_HEAD = 2;
 
 export function createToolSignature(tool: string, args: Record<string, unknown> | undefined): string {
   if (!args) return tool;
