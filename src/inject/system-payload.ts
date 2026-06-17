@@ -20,7 +20,12 @@ import type { RepoMapTracker } from "../repomap/tracker.js";
 import { formatRepoMap } from "../repomap/injector.js";
 
 const TOOL_HINT =
-  "Memory tools available: memory_search, memory_store, memory_forget. Guidelines: (1) Use memory_search to recall past decisions before re-deciding. (2) After encountering a tool error and fixing it, use memory_store with type=\"gotcha\" to save the error+fix pair. (3) When the user states a constraint or rule, use memory_store with type=\"constraint\".";
+  "Memory tools available: memory_search, memory_store, memory_forget, memory_expand, deep_expand. Guidelines:\n" +
+  "  (1) BEFORE making ANY technical decision, search: memory_search(query=\"decision OR decided OR chose OR 选择 OR 决定\", scope=\"project\")\n" +
+  "  (2) BEFORE fixing an error, search for known pitfalls: memory_search(query=\"gotcha OR error OR bug OR 坑 OR 错误\", scope=\"project\")\n" +
+  "  (3) AFTER fixing an error, store it: memory_store(type=\"gotcha\", content=\"[error]: ... → [fix]: ...\", scope=\"project\")\n" +
+  "  (4) WHEN user states a constraint/rule, store it: memory_store(type=\"constraint\", content=\"...\", scope=\"project\")\n" +
+  "  (5) WHEN a technical decision is made, store it: memory_store(type=\"decision\", content=\"[decision]: ... → [reason]: ...\", scope=\"project\")";
 
 export interface ComposeSystemPayloadOpts {
   state: PluginState;

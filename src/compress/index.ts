@@ -9,6 +9,7 @@ import { crushJsonArray } from "./json-crush.js";
 import { pruneOldMessages } from "./message-prune.js";
 import { ccrStore, ccrInjectMarker } from "./ccr.js";
 import { shouldInjectNudge, buildNudgeText } from "./nudge.js";
+import { detectMemoryNudge, buildMemoryNudge } from "./memory-nudge.js";
 import { detectContentType } from "./detector.js";
 
 interface MessagePart {
@@ -81,6 +82,23 @@ export function runCompressionPipeline(ctx: PipelineContext): PipelineResult {
         lastTextPart.text += buildNudgeText(pressure.level);
         stats.nudgeInjected = true;
         state.recordNudge(messages.length);
+      }
+    }
+  }
+
+  // === Memory nudge: always check for memory-worthy patterns ===
+  const memoryNudge = detectMemoryNudge(messages, state.messagesSinceLastNudge(messages.length));
+  if (memoryNudge.injected) {
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg) {
+      const textParts = lastMsg.parts.filter(
+        (p): p is MessagePart => typeof p === "object" && p !== null && p.type === "text"
+      );
+      const lastTextPart = textParts[textParts.length - 1];
+      if (lastTextPart && typeof lastTextPart.text === "string") {
+        lastTextPart.text += buildMemoryNudge(memoryNudge.type!);
+        state.recordNudge(messages.length);
+        logger?.debug("compress: memory nudge", { type: memoryNudge.type });
       }
     }
   }
