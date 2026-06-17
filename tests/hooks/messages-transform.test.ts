@@ -174,9 +174,9 @@ describe("createMessagesTransformHandler", () => {
     const output = makeOutput(msgs);
     await handler({} as never, output as never);
     // After removal, the message at targetIdx is filler-0 (shifted up)
-    const shiftedMsg = output.messages[targetIdx] as Record<string, unknown>;
+    const shiftedMsg = output.messages[targetIdx] as unknown as { info: { role: string }; parts: unknown[] };
     expect(shiftedMsg.info.role).toBe("assistant");
-    expect((shiftedMsg.parts as Record<string, unknown>[])[0].text).toBe("filler-0");
+    expect((shiftedMsg.parts[0] as Record<string, unknown>).text).toBe("filler-0");
     expect(logger.debug).toHaveBeenCalledWith(
       "messages.transform: stripped",
       expect.objectContaining({ system_neutralized: 1 }),
@@ -281,9 +281,9 @@ describe("createMessagesTransformHandler", () => {
     );
     const output = makeOutput(msgs);
     await handler({} as never, output as never);
-    const shiftedMsg = output.messages[targetIdx] as Record<string, unknown>;
+    const shiftedMsg = output.messages[targetIdx] as unknown as { info: { role: string }; parts: unknown[] };
     expect(shiftedMsg.info.role).toBe("assistant");
-    expect((shiftedMsg.parts as Record<string, unknown>[])[0].text).toBe("filler-0");
+    expect((shiftedMsg.parts[0] as Record<string, unknown>).text).toBe("filler-0");
   });
 
   // 13. Tool error ≤100 chars NOT truncated
