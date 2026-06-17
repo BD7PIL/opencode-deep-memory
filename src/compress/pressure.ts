@@ -103,7 +103,7 @@ export function extractInputTokensFromMessages(messages: Array<{ parts: unknown[
 export function detectPressure(messages: Array<{ info: { role: string }; parts: unknown[] }>, modelContextWindow?: number): PressureInfo {
   const ctx = maxContextFrom(modelContextWindow || 0);
   const inputTokens = extractInputTokensFromMessages(messages);
-  const estimated = inputTokens > 0 ? inputTokens : 0;
+  const estimated = inputTokens > 0 ? inputTokens : extractTokensFromMessages(messages);
   const ratio = Math.min(estimated / ctx, 1.0);
 
   let level: PressureLevel;

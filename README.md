@@ -7,11 +7,11 @@
 OpenCode sessions are stateless. Every restart is a cold start. Native compaction
 destroys conversation content. **deep-memory** adds three layers:
 
-| Layer | Hook | Purpose |
-|-------|------|---------|
-| **Remember** | `memory_search`, `memory_store`, `memory_forget`, `memory_expand` | Decisions, constraints, gotchas survive across sessions via BM25 + CJK search. Storage at `.deep-memory/` in your project root — visible, version-controllable. |
-| **Recover** | `session.created`, `experimental.session.compacting` | Checkpoint captures conversation before compaction destroys it. Resume injection recalls everything on a new session (3000 token first-turn budget). |
-| **Compress** | `experimental.chat.messages.transform` | Old reasoning, metadata, system injections, and thinking tags stripped deterministically — no LLM calls. Cache-stable sentinel replacements preserve prompt cache. |
+| Layer | What survives | How |
+|-------|--------------|-----|
+| **Remember** | Decisions, constraints, gotchas | `memory_search` / `memory_store` — BM25 + CJK search across sessions |
+| **Recover** | Full conversation context | Checkpoint captures before compaction; resume injection on new session |
+| **Compress** | Token budget | Deterministic stripping + pressure-triggered deep compression — no LLM calls |
 
 ## Quick start
 
@@ -30,125 +30,116 @@ OpenCode auto-installs on startup. Memory appears at `.deep-memory/` in your pro
 ## How it works
 
 ```
-                         ┌─────────────────────────────┐
-                         │     system.transform         │
-                         │   m[0] stable (cache hit)    │
-                         │   m[1] volatile (per-turn)   │
-                         │   repo map (code symbols)    │
-                         └─────────────────────────────┘
-                                     ▲
-┌──────────────┐    ┌──────────────┐ │  ┌───────────────────────────┐
-│ chat.message │    │  chat.params │ │  │      messages.transform   │
-│ keyword→notes│    │ agent→budget │ │  │  ① Layer 1: strip reason. │
-│  "记住"/"rem" │    │ main 800t    │ │  │  ② Layer 2: deep compress │
-│              │    │ oracle 400t  │ │  │     dedup / error purge / │
-└──────────────┘    └──────────────┘ │  │     tool compress / JSON / │
-                                     │  │     message prune / CCR   │
-                     ┌──────────────┘  └───────────────────────────┘
-                     │
-┌────────────────────┴────────────────────────┐
-│                  event                      │
-│  session.created → resume + dream schedule  │
-│  session.idle    → enrichment + notify      │
-│  session.compacted → checkpoint             │
-└─────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  messages.transform (every turn)                                │
+│  ├─ Strip reasoning/thinking parts (physical removal)           │
+│  ├─ Remove system-injected messages (physical removal)          │
+│  ├─ Truncate old tool errors                                    │
+│  └─ Deep compress: dedup / tool output / JSON / assistant text  │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  system.transform (every turn)                                  │
+│  ├─ Inject stable: MEMORY.md constraints + tool hint (cache hit)│
+│  └─ Inject volatile: BM25 search results + repo map symbols     │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  compacting (before OpenCode destroys messages)                 │
+│  ├─ Capture raw messages → checkpoint.raw.json                  │
+│  ├─ Extract knowledge → checkpoint.md                           │
+│  └─ Inject structured handoff prompt for LLM                    │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  events                                                         │
+│  ├─ session.created → resume + dream schedule                   │
+│  ├─ session.idle    → enrichment                                │
+│  └─ session.compacted → pressure calibration                    │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Context compression
 
-Two compression layers run automatically, no LLM calls required.
+Two layers, fully automatic, no LLM calls.
 
-### Layer 1: Deterministic stripping
+### Layer 1: Deterministic stripping (always active)
 
-Always active, strips disposable content from old messages:
+| Target | Action |
+|--------|--------|
+| Old reasoning/thinking parts | Physical removal |
+| System injections (`<system-reminder>`, etc.) | Physical removal |
+| Tool errors >100 chars (older than 4 turns) | Truncate |
+| Inline `<thinking>` tags | Regex strip |
 
-| What gets stripped | How | Why safe |
-|--------------------|-----|----------|
-| `reasoning_details` metadata | Delete the JSON blob | Billing metadata, never reaches model |
-| Old reasoning text | Replace with `[cleared]` | Conclusions are in assistant text |
-| System injections | Replace with `[stripped]` | `<system-reminder>` stale after one turn |
-| Tool errors >100 chars | Truncate | An old error only needs "it failed" |
-| Inline `<thinking>` tags | Regex strip | Process, not product |
+No marker pollution — old content is physically removed, not replaced with `[cleared]` or `[stripped]`. This prevents [context confusion](https://www.philschmid.de/context-engineering-part-2).
 
 ### Layer 2: Deep compression (pressure-triggered)
 
-Activates when context pressure exceeds thresholds. Inspired by
-[DCP](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning),
-[Headroom](https://github.com/chopratejas/headroom), and
-[Edgee](https://github.com/edgee-ai/edgee).
-
 | Pressure | Threshold | Actions |
 |----------|-----------|---------|
-| **always** | every turn | tool dedup + error purge + tool output compress + JSON crush (all reversible via CCR) |
-| **medium** | ≥ 30% context | + old message text truncation (lossy, extracts key info) |
-| **high** | ≥ 50% context | + nudge (alerts model to save important findings)
+| **always** | every turn | tool dedup + error purge + tool output compress + JSON crush + assistant text compress |
+| **medium** | ≥ 50K tokens | + memory nudge (prompts LLM to use `memory_store`) |
+| **high** | ≥ 150K tokens | + pressure nudge (prompts LLM to summarize old tasks) |
 
-What gets compressed at medium+:
+Thresholds are absolute, not percentage-based — they work consistently across 200K and 1M+ context windows. Based on [Focus Agent](https://arxiv.org/html/2601.07190v1) research.
 
 | Target | Strategy | Source |
 |--------|----------|--------|
-| Duplicate tool calls | Signature matching (`toolName::sortedParams`) | DCP |
-| Old error inputs | Purge inputs after 4 turns | DCP |
-| File reads | Keep first 50 + key lines + last 20 | Edgee |
-| Command outputs | Keep errors + last 30 lines | Edgee |
-| Search results | Keep top-20, group by file | Edgee |
-| JSON arrays | Keep first 30% + last 15% + dedup middle | Headroom SmartCrusher |
-| Old assistant text | Extract key info (headings, code, errors) | DCP |
+| Duplicate tool calls | Signature matching | [DCP][] |
+| Old error inputs | Purge after 4 turns | [DCP][] |
+| File reads | Keep head + key lines + tail | [Edgee][] |
+| Command outputs | Keep errors + tail | [Edgee][] |
+| Search results | Keep top-20, group by file | [Edgee][] |
+| JSON arrays | Head + dedup middle + tail | [Headroom][] |
+| Old assistant text | Preserve structure, compress prose | [LLMLingua][] |
 
-All compressed content is **reversible** via CCR (Compress-Cache-Retrieve):
-originals are cached with SHA-256 hash and 5-minute TTL.
-Models can retrieve them via the `deep_expand` tool.
+All compressed content is **reversible** via CCR (Compress-Cache-Retrieve) — originals cached with SHA-256 hash, retrievable via `deep_expand` tool.
 
-**Never touched**: user messages, recent 8 messages, protected tools
-(question, edit, write, todowrite, memory_store/search/forget).
+**Never touched**: user messages, recent 4K tokens, protected tools (question, edit, write, todowrite, memory_*).
 
-## Toast notifications
+## Memory nudge
 
-After each LLM turn, deep-memory shows a toast notification (bottom-right corner) summarizing
-what was compressed and injected. The notification level is chosen automatically:
+Detects decisions, constraints, and fixes in conversation — nudges the LLM to persist them.
 
-| Scenario | Level | Content |
-|----------|-------|---------|
-| Injection only (no compression) | minimal | One-line summary: `-8.5K stripped` |
-| Compression (short session) | detailed | Progress bar + per-category breakdown |
-| Compression + rich context (repo-map, memory, checkpoint) | extended | Full panel with budget usage |
+| Pattern | Example | Nudge |
+|---------|---------|-------|
+| Decision | "我决定用 PostgreSQL" / "I'll use PostgreSQL" | `memory_store(type="decision")` |
+| Constraint | "不能用 eval()" / "must not use eval()" | `memory_store(type="constraint")` |
+| Error fix | "修复了权限问题" / "fixed the permission error" | `memory_store(type="gotcha")` |
 
-Example toast (detailed level):
+English + Chinese. Pressure nudge and memory nudge have independent cooldowns.
 
-```
-deep-memory | compressed
-─ Compression ─────────────────────────────
-│████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
-  reasoning -6.2K | metadata -2.1K | tool_err -0.8K
-─ Injection ───────────────────────────────
-  m[0] stable 1055B ✓  m[1] volatile 574B
-  tier=main | mode=normal
-  repo-map: 12 symbols | memory: 8 entries
-```
+## Tools
 
-## Cache-stable injection
+| Tool | Purpose |
+|------|---------|
+| `memory_search` | Search persistent memory (BM25 + CJK bigram) |
+| `memory_store` | Store decisions, constraints, gotchas, facts, notes |
+| `memory_forget` | Remove stale memory entries |
+| `memory_expand` | Retrieve original content of a compressed message |
+| `deep_expand` | Retrieve original content via CCR hash |
 
-Each turn pushes two system prompt fragments:
+## Compaction
 
-- **Stable** (`<deep-memory-stable>`): constraints, rules, and the tool hint.
-  These change only when MEMORY.md is updated — typically across sessions, not turns.
-  Because they're byte-identical turn after turn, the provider's prompt cache hits on this prefix.
+When OpenCode compacts a session:
 
-- **Volatile** (`<deep-memory-volatile>`): context-aware search results from the user's
-  current query, tier-allocated by importance, plus repo map symbols for recently-read files.
-  This is the only part that changes per turn.
+1. **Capture** raw messages to `checkpoint.raw.json`
+2. **Extract** knowledge via 5 heuristic extractors
+3. **Write** structured `checkpoint.md`
+4. **Inject** Hermes-8 structured prompt + Codex-style handoff prefix
 
-The injection budget adapts to the agent: main orchestrator gets 800 tokens per turn
-(3000 on session resume), deep-reasoning agents get 400, and tool subagents get 80.
+The LLM produces: Task Overview → Progress → Key Decisions → Constraints → Files Modified → Errors → Next Steps → Critical Context
 
-## Memory search (BM25 + CJK bigram)
+## Memory consolidation
 
-Instead of SQLite FTS5, we use a pure-JS BM25 engine with a CJK-aware tokenizer.
-Chinese runs are split into sliding 2-character bigrams (`"权限死锁"` →
-`["权","权限","限死","死锁","锁"]`), making multi-character CJK phrases searchable
-without an embedding model. Latin text uses standard whitespace/punctuation splitting.
-The index is rebuilt from Markdown files on startup (<250ms for 2000 entries) and
-updated incrementally on writes.
+| Cycle | Trigger | Action |
+|-------|---------|--------|
+| **Auto-dream** | 7 days or notes.md >20 lines | Consolidate notes + checkpoints → MEMORY.md |
+| **Auto-distill** | 30 days | Package recurring workflows → skill candidates |
+| **Enrichment** | Session idle after compaction | LLM enriches checkpoint with cross-references |
+
+New projects: MEMORY.md auto-bootstraps from notes.md. Both agents have `memory_forget` enabled.
 
 ## Configuration
 
@@ -161,48 +152,28 @@ updated incrementally on writes.
 ## Storage
 
 ```
-<project>/.deep-memory/       ← version-controllable
+<project>/.deep-memory/
 ├── MEMORY.md                   persistent decisions/constraints/gotchas
 ├── notes.md                    keyword captures
 ├── checkpoint.md               last compaction extraction
+├── checkpoint.raw.json         raw messages dump
 ├── .schedule.json              dream/distill state
-└── sessions/<sid>/              per-session archive
+├── .compaction-log.jsonl       compaction audit trail
+└── sessions/<sid>/             per-session archive
 ```
 
-## Tools
-
-| Tool | Purpose |
-|------|---------|
-| `memory_search` | Search persistent memory across sessions (BM25 + CJK) |
-| `memory_store` | Store decisions, constraints, gotchas, facts, notes |
-| `memory_forget` | Remove memory entries matching a query |
-| `memory_expand` | Decompress a sentinel reference to its original content |
-| `deep_expand` | Retrieve original content compressed by CCR (use `[ccr:HASH]` marker) |
-| `deep_expand` | Retrieve original content compressed by CCR (use `[ccr:HASH]` marker) |
-
 ## Commands
-
-Copy `.opencode/command/*.md` to your project:
 
 - `/checkpoint` — manually capture session state
 - `/dream` — consolidate notes into persistent memory
 - `/distill` — package recurring workflows into skills
 
-## Design
+## Development
 
-**Memory entries** carry a type (`decision`, `constraint`, `gotcha`, `fact`, `note`) and
-an importance score. Importance is heuristically derived from entry type, recency,
-frequency across sessions, and keyword-match relevance to the current query —
-no LLM calls required.
-
-Entries are stored as Markdown sections (e.g. `## Decisions`, `## Constraints`) in
-`MEMORY.md`, with `[date]` timestamps for time-based decay. The BM25 index is rebuilt
-from these files on startup and updated incrementally on write.
-
-Background consolidation runs on a 7-day cycle (auto-dream) plus an accumulation trigger
-(when `notes.md` exceeds 20 lines). A separate 30-day cycle (auto-distill) packages
-recurring workflows into skill candidates. Both use background sessions to avoid
-consuming the main session's context budget.
+```bash
+npm install
+npm run verify   # typecheck + test (363) + build + smoke (49)
+```
 
 ## Acknowledgments
 
@@ -236,6 +207,21 @@ Our per-tool compression strategies (read, bash, grep, glob) are inspired by Edg
 **[Contextomizer][]** — ultra-fast deterministic library for transforming bloated tool outputs.
 Our content type detection pipeline is inspired by Contextomizer's approach.
 
+**[Focus Agent][]** — autonomous memory management for coding agents.
+Our absolute token thresholds and assistant text compression strategy are based on Focus Agent's research.
+
+**[LLMLingua][]** — prompt compression for LLMs.
+Our selective assistant text compression (preserve structure, compress prose) is inspired by LLMLingua's approach.
+
+**[Codex CLI][]** — OpenAI's coding agent.
+Our handoff prefix pattern (telling the LLM it's resuming a prior task) is based on Codex CLI's compaction protocol.
+
+**[Google ADK][]** — Agent Development Kit with append-only event compaction.
+Our structured compaction prompt (Hermes-8 sections) is inspired by ADK's compaction architecture.
+
+**[Hermes][]** — production-grade compaction prompt design.
+Our 8-section checkpoint template follows Hermes's structured summary format.
+
 [MiMo-Code]: https://github.com/XiaomiMiMo/MiMo-Code
 [Magic Context]: https://github.com/cortexkit/magic-context
 [Aider]: https://github.com/Aider-AI/aider
@@ -247,31 +233,11 @@ Our content type detection pipeline is inspired by Contextomizer's approach.
 [Headroom]: https://github.com/chopratejas/headroom
 [Edgee]: https://github.com/edgee-ai/edgee
 [Contextomizer]: https://github.com/GandalFran/contextomizer
-
-## Development
-
-```bash
-npm install
-npm run verify   # typecheck + test (363) + build + smoke (49)
-```
-
-Stats: 54 source files, 27 test files (363 tests), 10 compress modules, 49 smoke checks.
-
-## CI/CD (npm Trusted Publishing)
-
-Releases use npm OIDC Trusted Publishing — no token needed. To set up for a fork:
-
-1. **npmjs.com** → Package Settings → Trusted Publishers → Add:
-   - Owner: your GitHub username
-   - Repository: your fork name
-   - Workflow filename: `publish.yml`
-2. **package.json** → update `repository.url` to match your fork
-3. **Push a tag** → GitHub Actions auto-publishes:
-   ```bash
-   git tag v1.0.0 && git push origin v1.0.0
-   ```
-
-Requirements: npm CLI ≥ 11.5.1, Node.js ≥ 22, `id-token: write` permission, public repository.
+[Focus Agent]: https://arxiv.org/html/2601.07190v1
+[LLMLingua]: https://github.com/microsoft/LLMLingua
+[Codex CLI]: https://github.com/openai/codex
+[Google ADK]: https://github.com/google/adk-python
+[Hermes]: https://github.com/NousResearch/hermes-agent
 
 ## License
 

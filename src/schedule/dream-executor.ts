@@ -99,7 +99,7 @@ export async function runDream(
         tools: {
           memory_search: true,
           memory_store: true,
-          memory_forget: false,
+          memory_forget: true,
           read: true,
           list: true,
         },

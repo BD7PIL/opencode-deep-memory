@@ -22,19 +22,19 @@ const MEMORY_NUDGE_COOLDOWN = 3;
 
 const DECISION_PATTERNS = [
   /\b(?:decided|decision|chose|chosen|picked|selected)\b/i,
-  /\b(?:采用|选择|决定|确定|选用)\b/,
+  /(?:采用|选择|决定|确定|选用)/,
   /\b(?:use|using|go with|went with)\b.*\b(?:because|since|due to)\b/i,
 ];
 
 const CONSTRAINT_PATTERNS = [
   /\b(?:must not|cannot|should not|do not|never|always)\b/i,
   /\b(?:constraint|restriction|limitation|requirement)\b/i,
-  /\b(?:不能|必须|禁止|约束|限制|要求|务必)\b/,
+  /(?:不能|必须|禁止|约束|限制|要求|务必)/,
 ];
 
 const ERROR_FIX_PATTERNS = [
   /\b(?:fix|fixed|resolve|resolved|patch|corrected)\b/i,
-  /\b(?:修复|修复了|解决|解决了)\b/,
+  /(?:修复|修复了|解决|解决了)/,
   /\b(?:the (?:bug|error|issue) (?:was|is)|root cause)\b/i,
 ];
 
@@ -63,15 +63,17 @@ export function detectMemoryNudge(
     m.parts.some(p => p.type === "tool" && p.state?.status === "error")
   );
 
+  const recentAll = recentUserText + "\n" + recentAssistantText;
+
   if (hasRecentToolError && ERROR_FIX_PATTERNS.some(p => p.test(recentAssistantText))) {
     return { injected: true, type: "gotcha" };
   }
 
-  if (CONSTRAINT_PATTERNS.some(p => p.test(recentUserText))) {
+  if (CONSTRAINT_PATTERNS.some(p => p.test(recentAll))) {
     return { injected: true, type: "constraint" };
   }
 
-  if (DECISION_PATTERNS.some(p => p.test(recentAssistantText))) {
+  if (DECISION_PATTERNS.some(p => p.test(recentAll))) {
     return { injected: true, type: "decision" };
   }
 

@@ -73,21 +73,23 @@ export function runCompressionPipeline(ctx: PipelineContext): PipelineResult {
   };
 
   const sid = sessionID || "default";
+  const currentMsgCount = messages.length;
 
-  // Nudge: only when pressure ≥ 50%
-  const messagesSinceNudge = state.messagesSinceLastNudge(sid, messages.length);
-  if (shouldInjectNudge(pressure.level, messagesSinceNudge)) {
+  // Pressure nudge: only when pressure ≥ high
+  const pressureSince = state.messagesSinceLastNudge(sid, currentMsgCount);
+  if (shouldInjectNudge(pressure.level, pressureSince)) {
     if (injectIntoLastAssistant(messages, buildNudgeText(pressure.level))) {
       stats.nudgeInjected = true;
-      state.recordNudge(sid, messages.length);
+      state.recordNudge(sid, currentMsgCount);
     }
   }
 
-  // Memory nudge
-  const memoryNudge = detectMemoryNudge(messages as never, state.messagesSinceLastNudge(sid, messages.length));
+  // Memory nudge: always check, independent cooldown
+  const memorySince = state.messagesSinceLastMemoryNudge(sid, currentMsgCount);
+  const memoryNudge = detectMemoryNudge(messages as never, memorySince);
   if (memoryNudge.injected) {
     if (injectIntoLastAssistant(messages, buildMemoryNudge(memoryNudge.type!))) {
-      state.recordNudge(sid, messages.length);
+      state.recordMemoryNudge(sid, currentMsgCount);
       logger?.debug("compress: memory nudge", { type: memoryNudge.type });
     }
   }

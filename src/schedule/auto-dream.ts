@@ -139,28 +139,43 @@ export async function handleSessionCreatedForDream(
     return;
   }
 
-  // 5. Read notes.md (used for accumulation trigger + empty check)
+  // 5. Read notes.md (used for accumulation trigger + empty check + bootstrap)
   const notesPath = memoryFilePath("project", "notes", projectPath);
   let notesLines = 0;
+  let notesContent = "";
   try {
-    const content = fs.readFileSync(notesPath, "utf8");
-    if (content.trim().length === 0) {
+    notesContent = fs.readFileSync(notesPath, "utf8");
+    if (notesContent.trim().length === 0) {
       logger?.debug("auto-dream: notes.md is empty, skipping spawn");
       return;
     }
-    notesLines = content.split("\n").filter((l) => l.trim()).length;
+    notesLines = notesContent.split("\n").filter((l) => l.trim()).length;
   } catch {
     logger?.debug("auto-dream: notes.md not found, skipping spawn");
     return;
   }
 
-  // 6. Check MEMORY.md exists — dream needs target to write to
+  // 6. Check MEMORY.md exists — bootstrap from notes.md if missing
   const memoryPath = memoryFilePath("project", "memory", projectPath);
   if (!fs.existsSync(memoryPath) || fs.statSync(memoryPath).size < 50) {
-    logger?.debug("auto-dream: MEMORY.md missing or too small, skipping", {
-      sessionID: info.id,
-    });
-    return;
+    if (notesLines >= 5) {
+      try {
+        fs.writeFileSync(memoryPath, notesContent, "utf8");
+        logger?.info("auto-dream: bootstrapped MEMORY.md from notes.md", {
+          notesLines,
+        });
+      } catch (err) {
+        logger?.warn("auto-dream: failed to bootstrap MEMORY.md", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return;
+      }
+    } else {
+      logger?.debug("auto-dream: MEMORY.md missing and notes too small, skipping", {
+        sessionID: info.id,
+      });
+      return;
+    }
   }
 
   // 8. Determine if dream is due

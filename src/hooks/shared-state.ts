@@ -103,6 +103,7 @@ export class PluginState {
   private _ccrCache = new Map<string, CCRCacheEntry>();
   private _lastInputTokens = 0;
   private _lastNudgeMessageCount = new Map<string, number>();
+  private _lastMemoryNudgeMessageCount = new Map<string, number>();
   private _lastCCRCleanup = 0;
   private _modelContextWindow = 0;
 
@@ -119,6 +120,7 @@ export class PluginState {
     this._models.delete(sessionID);
     this._lastUserText.delete(sessionID);
     this._lastNudgeMessageCount.delete(sessionID);
+    this._lastMemoryNudgeMessageCount.delete(sessionID);
   }
 
   recordModel(sessionID: string, model: { providerID: string; modelID: string }): void {
@@ -297,6 +299,15 @@ export class PluginState {
 
   messagesSinceLastNudge(sessionID: string, currentMessageCount: number): number {
     const last = this._lastNudgeMessageCount.get(sessionID);
+    return last != null ? currentMessageCount - last : Number.POSITIVE_INFINITY;
+  }
+
+  recordMemoryNudge(sessionID: string, messageCount: number): void {
+    this._lastMemoryNudgeMessageCount.set(sessionID, messageCount);
+  }
+
+  messagesSinceLastMemoryNudge(sessionID: string, currentMessageCount: number): number {
+    const last = this._lastMemoryNudgeMessageCount.get(sessionID);
     return last != null ? currentMessageCount - last : Number.POSITIVE_INFINITY;
   }
 
