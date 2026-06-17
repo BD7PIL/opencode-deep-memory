@@ -311,10 +311,6 @@ export class PluginState {
     return last != null ? currentMessageCount - last : Number.POSITIVE_INFINITY;
   }
 
-  setModelContextWindow(tokens: number): void {
-    if (tokens > 0) this._modelContextWindow = tokens;
-  }
-
   getModelContextWindow(): number {
     return this._modelContextWindow;
   }

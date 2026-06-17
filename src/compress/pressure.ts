@@ -78,23 +78,19 @@ export function extractTokensFromMessages(messages: Array<{ info: { role: string
 }
 
 export function extractInputTokensFromMessages(messages: Array<{ parts: unknown[] }>): number {
-  // Sum input + cached from the latest step-finish — this represents the
-  // total context window usage (fresh input + cached prefix).
-  // Example: 7K input + 177K cache = 184K total context sent to model.
   let best = 0;
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     for (const part of msg.parts) {
       if (typeof part !== "object" || part === null) continue;
       const p = part as Record<string, unknown>;
-      if (p["type"] === "step-finish") {
-        const tokens = p as { tokens?: { input?: number; cached?: number } };
-        const input = tokens.tokens?.input ?? 0;
-        const cached = tokens.tokens?.cached ?? 0;
-        const total = input + cached;
-        if (total > best) best = total;
-        if (best > 0) return best;
-      }
+      if (p["type"] !== "step-finish") continue;
+      const tokens = p as { tokens?: { input?: number; cache?: { read?: number } } };
+      const input = tokens.tokens?.input ?? 0;
+      const cached = tokens.tokens?.cache?.read ?? 0;
+      const total = input + cached;
+      if (total > best) best = total;
+      if (best > 0) return best;
     }
   }
   return best;
