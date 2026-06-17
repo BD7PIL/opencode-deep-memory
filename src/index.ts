@@ -27,7 +27,7 @@ import { handleSessionCreated as handleResume } from "./schedule/resume.js";
 import { handleSessionCreatedForDream } from "./schedule/auto-dream.js";
 import { handleSessionCreatedForDistill } from "./schedule/auto-distill.js";
 import { SearchService } from "./search/service.js";
-import { createMemoryTools } from "./tools/index.js";
+import { createMemoryTools, createDeepExpandTool } from "./tools/index.js";
 import { createCompactingHandler } from "./hooks/compacting.js";
 import { createMessagesTransformHandler } from "./hooks/messages-transform.js";
 import { createNotifyHandler } from "./hooks/notify.js";
@@ -250,7 +250,7 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
       }
     },
 
-    tool: memoryTools,
+    tool: { ...memoryTools, deep_expand: createDeepExpandTool(state) },
 
     "tool.execute.after": async (input, output) => {
       if (input.tool !== "read") return;

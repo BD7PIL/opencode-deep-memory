@@ -299,7 +299,10 @@ describe("createMessagesTransformHandler", () => {
     const parts = output.messages[targetIdx].parts as Record<string, unknown>[];
     const toolState = parts[0]["state"] as Record<string, unknown>;
     expect(toolState["error"]).toBe("short error");
-    expect(logger.debug).not.toHaveBeenCalled();
+    expect(logger.debug).not.toHaveBeenCalledWith(
+      expect.stringContaining("stripped"),
+      expect.anything(),
+    );
   });
 
   // 14. Metadata parts (step-start, etc.) are skipped
@@ -330,7 +333,10 @@ describe("createMessagesTransformHandler", () => {
     const output = makeOutput(msgs);
     await handler({} as never, output as never);
     // No stripping stats should be logged (nothing changed)
-    expect(logger.debug).not.toHaveBeenCalled();
+    expect(logger.debug).not.toHaveBeenCalledWith(
+      expect.stringContaining("stripped"),
+      expect.anything(),
+    );
   });
 
   // C1: No-op when messages.length <= KEEP_RECENT + PROTECTED_HEAD (11)

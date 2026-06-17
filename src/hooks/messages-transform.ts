@@ -9,6 +9,7 @@
 import type { Hooks } from "@opencode-ai/plugin";
 import type { PluginState } from "./shared-state.js";
 import type { Logger } from "../shared/log.js";
+import { runCompressionPipeline } from "../compress/index.js";
 
 const KEEP_RECENT = 8;
 
@@ -215,6 +216,26 @@ export function createMessagesTransformHandler(
 
     if (Object.values(stats).some(v => v > 0)) {
       logger?.debug("messages.transform: stripped", stats);
+    }
+
+    const pipelineResult = runCompressionPipeline({
+      messages: output.messages as never,
+      state,
+      logger,
+    });
+
+    const ds = pipelineResult.stats;
+    if (ds.toolDedup > 0 || ds.errorPurge > 0 || ds.toolOutputCompressed > 0 ||
+        ds.jsonCrushed > 0 || ds.messagePruned > 0 || ds.nudgeInjected) {
+      logger?.debug("messages.transform: deep compression", { ...ds });
+      state.mergeNotify({
+        compression: stats,
+        deepCompression: ds,
+        messageCount: messages.length,
+        protectedHead: PROTECTED_HEAD,
+        protectedTail: KEEP_RECENT,
+      });
+    } else if (Object.values(stats).some(v => v > 0)) {
       state.mergeNotify({
         compression: stats,
         messageCount: messages.length,

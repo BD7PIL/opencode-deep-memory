@@ -61,8 +61,33 @@ export interface PendingNotify {
   protectedHead?: number;
   /** Number of messages in the protected tail zone. */
   protectedTail?: number;
+  /** Deep compression stats. */
+  deepCompression?: DeepCompressionStats;
   /** Timestamp of first stat write (for cooldown). */
   setAt: number;
+}
+
+/** Stats from the deep compression pipeline. */
+export interface DeepCompressionStats {
+  toolDedup: number;
+  errorPurge: number;
+  toolOutputCompressed: number;
+  jsonCrushed: number;
+  messagePruned: number;
+  ccrStored: number;
+  nudgeInjected: boolean;
+  pressureLevel: "low" | "medium" | "high" | "critical";
+  estimatedTokens: number;
+}
+
+/** CCR (Compress-Cache-Retrieve) entry. */
+export interface CCRCacheEntry {
+  hash: string;
+  original: string;
+  compressed: string;
+  createdAt: number;
+  toolName?: string;
+  callID?: string;
 }
 
 export class PluginState {
@@ -74,6 +99,9 @@ export class PluginState {
   private _pendingEnrichments = new Set<string>();
   private _lastUserText = new Map<string, string>();
   private _pendingNotify: PendingNotify | null = null;
+  private _toolSignatures = new Map<string, string>();
+  private _ccrCache = new Map<string, CCRCacheEntry>();
+  private _lastInputTokens = 0;
 
   agentOf(sessionID: string): string | undefined {
     return this._agents.get(sessionID);
@@ -212,6 +240,43 @@ export class PluginState {
     const n = this._pendingNotify;
     this._pendingNotify = null;
     return n;
+  }
+
+  recordToolSignature(callID: string, signature: string): void {
+    this._toolSignatures.set(callID, signature);
+  }
+
+  isDuplicateTool(signature: string): boolean {
+    for (const existing of this._toolSignatures.values()) {
+      if (existing === signature) return true;
+    }
+    return false;
+  }
+
+  getToolSignature(callID: string): string | undefined {
+    return this._toolSignatures.get(callID);
+  }
+
+  ccStore(hash: string, entry: CCRCacheEntry): void {
+    if (this._ccrCache.size > 200) {
+      const oldest = [...this._ccrCache.entries()]
+        .sort((a, b) => a[1].createdAt - b[1].createdAt)
+        .slice(0, 50);
+      for (const [k] of oldest) this._ccrCache.delete(k);
+    }
+    this._ccrCache.set(hash, entry);
+  }
+
+  ccrGet(hash: string): CCRCacheEntry | undefined {
+    return this._ccrCache.get(hash);
+  }
+
+  recordInputTokens(tokens: number): void {
+    this._lastInputTokens = tokens;
+  }
+
+  lastInputTokens(): number {
+    return this._lastInputTokens;
   }
 }
 

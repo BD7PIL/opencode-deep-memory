@@ -37,16 +37,16 @@ OpenCode auto-installs on startup. Memory appears at `.deep-memory/` in your pro
                          │   repo map (code symbols)    │
                          └─────────────────────────────┘
                                      ▲
-┌──────────────┐    ┌──────────────┐ │  ┌──────────────┐
-│ chat.message │    │  chat.params │ │  │messages.tfm  │
-│ keyword→notes│    │ agent→budget │ │  │ strip old     │
-│  "记住"/"rem" │    │ main 800t    │ │  │ reasoning +   │
-│              │    │ oracle 400t  │ │  │ metadata +    │
-└──────────────┘    └──────────────┘ │  │ errors        │
-                                     │  └──────────────┘
-                      ┌──────────────┘
-                      │
-┌─────────────────────┴───────────────────────┐
+┌──────────────┐    ┌──────────────┐ │  ┌───────────────────────────┐
+│ chat.message │    │  chat.params │ │  │      messages.transform   │
+│ keyword→notes│    │ agent→budget │ │  │  ① Layer 1: strip reason. │
+│  "记住"/"rem" │    │ main 800t    │ │  │  ② Layer 2: deep compress │
+│              │    │ oracle 400t  │ │  │     dedup / error purge / │
+└──────────────┘    └──────────────┘ │  │     tool compress / JSON / │
+                                     │  │     message prune / CCR   │
+                     ┌──────────────┘  └───────────────────────────┘
+                     │
+┌────────────────────┴────────────────────────┐
 │                  event                      │
 │  session.created → resume + dream schedule  │
 │  session.idle    → enrichment + notify      │
@@ -56,23 +56,52 @@ OpenCode auto-installs on startup. Memory appears at `.deep-memory/` in your pro
 
 ## Context compression
 
-Old messages (>8 turns) are compressed deterministically, without calling an LLM.
-The key insight: **reasoning is a disposable process** — once the model reaches a conclusion
-(in the text or tool output), the reasoning that got it there no longer affects future turns.
-Similarly, API metadata, system notifications, and inline thinking tags carry no value
-once the conversation moves past them. We strip these in-place, replacing removed parts
-with sentinels so message structure stays intact and prompt caching is preserved.
+Two compression layers run automatically, no LLM calls required.
+
+### Layer 1: Deterministic stripping
+
+Always active, strips disposable content from old messages:
 
 | What gets stripped | How | Why safe |
 |--------------------|-----|----------|
-| `reasoning_details` metadata | Delete the JSON blob from the part | API billing metadata, never reaches the model |
-| Old reasoning text | Set `thinking`/`text` to `"[cleared]"` | Conclusions are in the assistant's text output |
-| System injections | Replace entire message with sentinel | `<system-reminder>` and OMO markers are stale after one turn |
-| Tool errors >100 chars | Truncate to first 100 chars | An old error only needs "it failed", not the full trace |
-| Inline `<thinking>` tags | Regex strip from old assistant text | Same as reasoning — process, not product |
+| `reasoning_details` metadata | Delete the JSON blob | Billing metadata, never reaches model |
+| Old reasoning text | Replace with `[cleared]` | Conclusions are in assistant text |
+| System injections | Replace with `[stripped]` | `<system-reminder>` stale after one turn |
+| Tool errors >100 chars | Truncate | An old error only needs "it failed" |
+| Inline `<thinking>` tags | Regex strip | Process, not product |
 
-**Never touched**: user messages (anchor turn boundaries), recent 8 messages (working context),
-tool calls and their results (API pairing integrity).
+### Layer 2: Deep compression (pressure-triggered)
+
+Activates when context pressure exceeds thresholds. Inspired by
+[DCP](https://github.com/Opencode-DCP/opencode-dynamic-context-pruning),
+[Headroom](https://github.com/chopratejas/headroom), and
+[Edgee](https://github.com/edgee-ai/edgee).
+
+| Pressure | Threshold | Actions |
+|----------|-----------|---------|
+| **low** | < 50% context | Layer 1 only |
+| **medium** | 50–70% | + tool dedup + error purge + tool output compression |
+| **high** | 70–85% | + JSON array crush + old message truncation + nudge |
+| **critical** | > 85% | + aggressive nudge (model prompted to compress) |
+
+What gets compressed at medium+:
+
+| Target | Strategy | Source |
+|--------|----------|--------|
+| Duplicate tool calls | Signature matching (`toolName::sortedParams`) | DCP |
+| Old error inputs | Purge inputs after 4 turns | DCP |
+| File reads | Keep first 50 + key lines + last 20 | Edgee |
+| Command outputs | Keep errors + last 30 lines | Edgee |
+| Search results | Keep top-20, group by file | Edgee |
+| JSON arrays | Keep first 30% + last 15% + dedup middle | Headroom SmartCrusher |
+| Old assistant text | Extract key info (headings, code, errors) | DCP |
+
+All compressed content is **reversible** via CCR (Compress-Cache-Retrieve):
+originals are cached with SHA-256 hash and 5-minute TTL.
+Models can retrieve them via the `deep_expand` tool.
+
+**Never touched**: user messages, recent 8 messages, protected tools
+(question, edit, write, todowrite, memory_store/search/forget).
 
 ## Toast notifications
 
@@ -141,6 +170,16 @@ updated incrementally on writes.
 └── sessions/<sid>/              per-session archive
 ```
 
+## Tools
+
+| Tool | Purpose |
+|------|---------|
+| `memory_search` | Search persistent memory across sessions (BM25 + CJK) |
+| `memory_store` | Store decisions, constraints, gotchas, facts, notes |
+| `memory_forget` | Remove memory entries matching a query |
+| `memory_expand` | Decompress a sentinel reference to its original content |
+| `deep_expand` | Retrieve original content compressed by CCR (use `[ccr:HASH]` marker) |
+
 ## Commands
 
 Copy `.opencode/command/*.md` to your project:
@@ -185,6 +224,18 @@ and JetBrains plugin.
 
 **[Plandex][]** — an AI coding agent designed for large tasks and real world projects.
 
+**[DCP][]** — Dynamic Context Pruning for OpenCode. Our tool deduplication, error purging,
+and nudge system are inspired by DCP's architecture.
+
+**[Headroom][]** — compress tool outputs, logs, files, RAG chunks for AI agents.
+Our JSON array crush and CCR (Compress-Cache-Retrieve) are derived from Headroom's SmartCrusher.
+
+**[Edgee][]** — agent gateway that compresses tokens before LLM providers.
+Our per-tool compression strategies (read, bash, grep, glob) are inspired by Edgee's approach.
+
+**[Contextomizer][]** — ultra-fast deterministic library for transforming bloated tool outputs.
+Our content type detection pipeline is inspired by Contextomizer's approach.
+
 [MiMo-Code]: https://github.com/XiaomiMiMo/MiMo-Code
 [Magic Context]: https://github.com/cortexkit/magic-context
 [Aider]: https://github.com/Aider-AI/aider
@@ -192,6 +243,10 @@ and JetBrains plugin.
 [Continue]: https://github.com/continuedev/continue
 [OpenHands]: https://github.com/All-Hands-AI/OpenHands
 [Plandex]: https://github.com/plandex-ai/plandex
+[DCP]: https://github.com/Opencode-DCP/opencode-dynamic-context-pruning
+[Headroom]: https://github.com/chopratejas/headroom
+[Edgee]: https://github.com/edgee-ai/edgee
+[Contextomizer]: https://github.com/GandalFran/contextomizer
 
 ## Development
 
@@ -199,6 +254,8 @@ and JetBrains plugin.
 npm install
 npm run verify   # typecheck + test (363) + build + smoke (49)
 ```
+
+Stats: 54 source files, 27 test files (363 tests), 10 compress modules, 49 smoke checks.
 
 ## CI/CD (npm Trusted Publishing)
 
