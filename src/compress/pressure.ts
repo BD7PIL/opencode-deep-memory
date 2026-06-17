@@ -19,12 +19,17 @@ let calibratedMaxContext = 0;
 
 export function calibrateFromCompaction(lastInputTokens: number): void {
   if (lastInputTokens <= 0) return;
-  const derived = Math.round(lastInputTokens / OPENCODE_COMPACTION_RATIO);
-  calibratedMaxContext = derived;
+  calibratedMaxContext = Math.round(lastInputTokens / OPENCODE_COMPACTION_RATIO);
 }
 
 export function getCalibratedMaxContext(): number {
   return calibratedMaxContext;
+}
+
+export function maxContextFrom(modelContextWindow: number): number {
+  if (modelContextWindow > 0) return modelContextWindow;
+  if (calibratedMaxContext > 0) return calibratedMaxContext;
+  return FALLBACK_MAX_CONTEXT;
 }
 
 export function estimateTokens(text: string): number {
@@ -83,16 +88,16 @@ export function extractInputTokensFromMessages(messages: Array<{ parts: unknown[
   return 0;
 }
 
-export function detectPressure(messages: Array<{ info: { role: string }; parts: unknown[] }>): PressureInfo {
-  const maxContext = calibratedMaxContext || FALLBACK_MAX_CONTEXT;
+export function detectPressure(messages: Array<{ info: { role: string }; parts: unknown[] }>, modelContextWindow?: number): PressureInfo {
+  const ctx = maxContextFrom(modelContextWindow || 0);
   const inputTokens = extractInputTokensFromMessages(messages);
   const estimated = inputTokens > 0 ? inputTokens : extractTokensFromMessages(messages);
-  const ratio = Math.min(estimated / maxContext, 1.0);
+  const ratio = Math.min(estimated / ctx, 1.0);
 
   let level: PressureLevel;
   if (ratio >= THRESHOLDS.high) level = "high";
   else if (ratio >= THRESHOLDS.medium) level = "medium";
   else level = "low";
 
-  return { level, ratio, estimatedTokens: estimated, maxContext };
+  return { level, ratio, estimatedTokens: estimated, maxContext: ctx };
 }

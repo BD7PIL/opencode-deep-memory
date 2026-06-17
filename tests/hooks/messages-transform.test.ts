@@ -124,12 +124,13 @@ describe("createMessagesTransformHandler", () => {
 
     const oldParts = output.messages[targetIdx].parts as Record<string, unknown>[];
     const recentParts = output.messages[msgs.length - 1].parts as Record<string, unknown>[];
-    expect(oldParts[0]["text"]).toBe("[cleared]");
+    expect(oldParts.length).toBe(0);
+    expect(recentParts.length).toBe(1);
     expect(recentParts[0]["text"]).toBe("recent reasoning");
   });
 
-  // 5. Old reasoning text cleared to "[cleared]"
-  it("clears old reasoning text to [cleared]", async () => {
+  // 5. Old reasoning parts removed entirely (not replaced with marker)
+  it("removes old reasoning parts entirely", async () => {
     const handler = createMessagesTransformHandler(state, logger as never);
     const { messages: msgs, targetIdx } = buildStripTestMessages(
       [{ type: "reasoning", text: "some reasoning", metadata: {} }],
@@ -138,15 +139,15 @@ describe("createMessagesTransformHandler", () => {
     const output = makeOutput(msgs);
     await handler({} as never, output as never);
     const parts = output.messages[targetIdx].parts as Record<string, unknown>[];
-    expect(parts[0]["text"]).toBe("[cleared]");
+    expect(parts.length).toBe(0);
     expect(logger.debug).toHaveBeenCalledWith(
       "messages.transform: stripped",
       expect.objectContaining({ reasoning_cleared: 1 }),
     );
   });
 
-  // 6. openrouter.reasoning_details metadata stripped
-  it("strips openrouter.reasoning_details metadata", async () => {
+  // 6. openrouter.reasoning_details metadata stripped before part removal
+  it("strips openrouter.reasoning_details metadata before removal", async () => {
     const handler = createMessagesTransformHandler(state, logger as never);
     const reasoningMeta = { openrouter: { reasoning_details: [{ text: "chain of thought" }] } };
     const { messages: msgs, targetIdx } = buildStripTestMessages(
@@ -156,17 +157,15 @@ describe("createMessagesTransformHandler", () => {
     const output = makeOutput(msgs);
     await handler({} as never, output as never);
     const parts = output.messages[targetIdx].parts as Record<string, unknown>[];
-    const meta = parts[0]["metadata"] as Record<string, unknown>;
-    const openrouter = meta["openrouter"] as Record<string, unknown>;
-    expect(openrouter["reasoning_details"]).toBeUndefined();
+    expect(parts.length).toBe(0);
     expect(logger.debug).toHaveBeenCalledWith(
       "messages.transform: stripped",
       expect.objectContaining({ metadata_stripped: 1 }),
     );
   });
 
-  // 7. System injection message neutralized → parts replaced with [{type:"text",text:"[stripped]"}]
-  it("neutralizes system-injected messages", async () => {
+  // 7. System injection messages removed entirely (not replaced with sentinel)
+  it("removes system-injected messages entirely", async () => {
     const handler = createMessagesTransformHandler(state, logger as never);
     const { messages: msgs, targetIdx } = buildStripTestMessages(
       [{ type: "text", text: "<system-reminder>Do the thing</system-reminder>" }],
@@ -174,10 +173,10 @@ describe("createMessagesTransformHandler", () => {
     );
     const output = makeOutput(msgs);
     await handler({} as never, output as never);
-    const parts = output.messages[targetIdx].parts as Record<string, unknown>[];
-    expect(parts.length).toBe(1);
-    expect(parts[0]["type"]).toBe("text");
-    expect(parts[0]["text"]).toBe("[stripped]");
+    // After removal, the message at targetIdx is filler-0 (shifted up)
+    const shiftedMsg = output.messages[targetIdx] as Record<string, unknown>;
+    expect(shiftedMsg.info.role).toBe("assistant");
+    expect((shiftedMsg.parts as Record<string, unknown>[])[0].text).toBe("filler-0");
     expect(logger.debug).toHaveBeenCalledWith(
       "messages.transform: stripped",
       expect.objectContaining({ system_neutralized: 1 }),
@@ -273,8 +272,8 @@ describe("createMessagesTransformHandler", () => {
     );
   });
 
-  // 12. Empty text message (system injection pattern /^$/) neutralized
-  it("neutralizes empty text messages", async () => {
+  // 12. Empty text message (system injection pattern /^$/) removed entirely
+  it("removes empty text messages entirely", async () => {
     const handler = createMessagesTransformHandler(state, logger as never);
     const { messages: msgs, targetIdx } = buildStripTestMessages(
       [{ type: "text", text: "" }],
@@ -282,8 +281,9 @@ describe("createMessagesTransformHandler", () => {
     );
     const output = makeOutput(msgs);
     await handler({} as never, output as never);
-    const parts = output.messages[targetIdx].parts as Record<string, unknown>[];
-    expect(parts[0]["text"]).toBe("[stripped]");
+    const shiftedMsg = output.messages[targetIdx] as Record<string, unknown>;
+    expect(shiftedMsg.info.role).toBe("assistant");
+    expect((shiftedMsg.parts as Record<string, unknown>[])[0].text).toBe("filler-0");
   });
 
   // 13. Tool error ≤100 chars NOT truncated
@@ -323,11 +323,11 @@ describe("createMessagesTransformHandler", () => {
     expect(parts[1]["text"]).toBe("real content");
   });
 
-  // 15. Already-cleared reasoning not re-counted
-  it("does not re-count already-cleared reasoning", async () => {
+  // 15. Already-removed reasoning (empty parts) handled correctly
+  it("handles already-empty parts correctly", async () => {
     const handler = createMessagesTransformHandler(state, logger as never);
     const { messages: msgs } = buildStripTestMessages(
-      [{ type: "reasoning", text: "[cleared]" }],
+      [],  // empty parts — nothing to remove
       "already-1",
     );
     const output = makeOutput(msgs);
@@ -374,7 +374,7 @@ describe("createMessagesTransformHandler", () => {
     expect(headParts[0]["text"]).toBe("protected reasoning");
     // Target message stripped
     const targetParts = output.messages[targetIdx].parts as Record<string, unknown>[];
-    expect(targetParts[0]["text"]).toBe("[cleared]");
+    expect(targetParts.length).toBe(0);
   });
 
   // A3: Orphaned tool_use parts get converted to synthetic tool results

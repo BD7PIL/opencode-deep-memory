@@ -6,7 +6,6 @@ import { deduplicateToolOutputs } from "./dedup.js";
 import { purgeOldErrors } from "./error-purge.js";
 import { compressToolOutput } from "./tool-compress.js";
 import { crushJsonArray } from "./json-crush.js";
-import { pruneOldMessages } from "./message-prune.js";
 import { ccrStore, ccrInjectMarker } from "./ccr.js";
 import { shouldInjectNudge, buildNudgeText } from "./nudge.js";
 import { detectMemoryNudge, buildMemoryNudge } from "./memory-nudge.js";
@@ -34,7 +33,6 @@ interface PipelineContext {
   messages: Message[];
   state: PluginState;
   logger?: Logger;
-  modelId?: string;
 }
 
 interface PipelineResult {
@@ -43,7 +41,7 @@ interface PipelineResult {
 
 export function runCompressionPipeline(ctx: PipelineContext): PipelineResult {
   const { messages, state, logger } = ctx;
-  const pressure = detectPressure(messages as Array<{ info: { role: string }; parts: unknown[] }>);
+  const pressure = detectPressure(messages as Array<{ info: { role: string }; parts: unknown[] }>, state.getModelContextWindow());
   state.recordInputTokens(pressure.estimatedTokens);
 
   const stats: DeepCompressionStats = {
@@ -51,7 +49,6 @@ export function runCompressionPipeline(ctx: PipelineContext): PipelineResult {
     errorPurge: 0,
     toolOutputCompressed: 0,
     jsonCrushed: 0,
-    messagePruned: 0,
     ccrStored: 0,
     nudgeInjected: false,
     pressureLevel: pressure.level,
@@ -63,11 +60,6 @@ export function runCompressionPipeline(ctx: PipelineContext): PipelineResult {
   stats.errorPurge = purgeOldErrors(messages);
   stats.jsonCrushed = crushJsonToolOutputs(messages, state);
   stats.toolOutputCompressed = compressOldToolOutputs(messages, state);
-
-  // === Lossy: only when pressure ≥ 30% ===
-  if (pressure.level === "medium" || pressure.level === "high") {
-    stats.messagePruned = pruneOldMessages(messages);
-  }
 
   // === Nudge: only when pressure ≥ 50% ===
   const messagesSinceNudge = state.messagesSinceLastNudge(messages.length);
@@ -88,7 +80,7 @@ export function runCompressionPipeline(ctx: PipelineContext): PipelineResult {
   }
 
   const active = stats.toolDedup > 0 || stats.errorPurge > 0 || stats.toolOutputCompressed > 0 ||
-    stats.jsonCrushed > 0 || stats.messagePruned > 0 || stats.nudgeInjected;
+    stats.jsonCrushed > 0 || stats.nudgeInjected;
   if (active) {
     logger?.debug("compress: pipeline result", { ...stats });
   } else {

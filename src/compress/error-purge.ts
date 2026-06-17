@@ -23,7 +23,7 @@ export function purgeOldErrors(
         const input = toolState["input"] as Record<string, unknown>;
         for (const key of Object.keys(input)) {
           if (key === "command" || key === "query" || key === "path" || key === "filePath") continue;
-          input[key] = "[purged]";
+          delete input[key];
         }
       }
       purged++;

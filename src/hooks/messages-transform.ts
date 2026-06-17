@@ -1,9 +1,12 @@
 /**
  * experimental.chat.messages.transform hook handler.
  *
- * Deterministic content compression: clears old reasoning, strips system
- * injections, truncates tool errors, removes inline thinking tags.
- * Only touches assistant messages outside the protected tail (last 8 messages).
+ * Deterministic content compression: removes old reasoning/thinking parts,
+ * deletes system-injected messages, truncates tool errors, strips inline
+ * thinking tags. NO marker text is injected — parts and messages are
+ * physically removed from the arrays to prevent context confusion.
+ *
+ * Only touches assistant messages outside the protected tail (last 8 msgs).
  */
 
 import type { Hooks } from "@opencode-ai/plugin";
@@ -137,6 +140,8 @@ export function createMessagesTransformHandler(
       thinking_stripped: 0,
     };
 
+    const toRemove: number[] = [];
+
     for (let i = PROTECTED_HEAD; i < protectedTailStart; i++) {
       const msg = messages[i];
       if (!msg?.parts?.length) continue;
@@ -144,7 +149,8 @@ export function createMessagesTransformHandler(
       // NEVER touch user messages
       if (msg.info.role === "user") continue;
 
-      for (let j = 0; j < msg.parts.length; j++) {
+      // Iterate parts IN REVERSE — safe for splice removal
+      for (let j = msg.parts.length - 1; j >= 0; j--) {
         const part = msg.parts[j];
         if (typeof part !== "object" || part === null) continue;
         const p = part as Record<string, unknown>;
@@ -154,7 +160,8 @@ export function createMessagesTransformHandler(
         // Skip metadata parts
         if (METADATA_PART_TYPES.has(partType)) continue;
 
-        // O15: Strip reasoning metadata (OpenRouter)
+        // O15: Reasoning/thinking parts — strip metadata, then REMOVE entirely
+        // (not replaced with "[cleared]" — that causes context confusion)
         if (partType === "reasoning" || partType === "thinking" || partType === "redacted_thinking") {
           const meta = p["metadata"] as Record<string, unknown> | undefined;
           if (meta) {
@@ -164,11 +171,9 @@ export function createMessagesTransformHandler(
               stats.metadata_stripped++;
             }
           }
-          // O15b: Clear old reasoning text
-          if (typeof p["text"] === "string" && p["text"] !== "[cleared]") {
-            p["text"] = "[cleared]";
-            stats.reasoning_cleared++;
-          }
+          msg.parts.splice(j, 1);
+          stats.reasoning_cleared++;
+          continue;
         }
 
         // O15: Strip tool reasoning metadata
@@ -201,12 +206,17 @@ export function createMessagesTransformHandler(
         }
       }
 
-      // O16: Strip system-injected messages (sentinel replacement)
+      // O16: Collect system-injected messages for removal (deferred — safe splice)
+      // NOT replaced with "[stripped]" — that causes context confusion
       if (isSystemInjected(msg)) {
-        msg.parts.length = 0;
-        msg.parts.push({ type: "text", text: "[stripped]" } as never);
+        toRemove.push(i);
         stats.system_neutralized++;
       }
+    }
+
+    // Apply deferred message removals (reverse order — safe splice)
+    for (let r = toRemove.length - 1; r >= 0; r--) {
+      messages.splice(toRemove[r], 1);
     }
 
     // A3: Defensive repair — scan for orphaned tool_use parts.
@@ -226,7 +236,7 @@ export function createMessagesTransformHandler(
 
     const ds = pipelineResult.stats;
     if (ds.toolDedup > 0 || ds.errorPurge > 0 || ds.toolOutputCompressed > 0 ||
-        ds.jsonCrushed > 0 || ds.messagePruned > 0 || ds.nudgeInjected) {
+        ds.jsonCrushed > 0 || ds.nudgeInjected) {
       logger?.debug("messages.transform: deep compression", { ...ds });
       state.mergeNotify({
         compression: stats,

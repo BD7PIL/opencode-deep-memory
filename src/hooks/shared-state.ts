@@ -73,7 +73,6 @@ export interface DeepCompressionStats {
   errorPurge: number;
   toolOutputCompressed: number;
   jsonCrushed: number;
-  messagePruned: number;
   ccrStored: number;
   nudgeInjected: boolean;
   pressureLevel: "low" | "medium" | "high";
@@ -103,6 +102,7 @@ export class PluginState {
   private _ccrCache = new Map<string, CCRCacheEntry>();
   private _lastInputTokens = 0;
   private _lastNudgeMessageCount = 0;
+  private _modelContextWindow = 0;
 
   agentOf(sessionID: string): string | undefined {
     return this._agents.get(sessionID);
@@ -290,6 +290,14 @@ export class PluginState {
 
   messagesSinceLastNudge(currentMessageCount: number): number {
     return currentMessageCount - this._lastNudgeMessageCount;
+  }
+
+  setModelContextWindow(tokens: number): void {
+    if (tokens > 0) this._modelContextWindow = tokens;
+  }
+
+  getModelContextWindow(): number {
+    return this._modelContextWindow;
   }
 }
 
