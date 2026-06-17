@@ -10,6 +10,7 @@ export interface SinglePassStats {
   errorPurge: number;
   toolOutputCompressed: number;
   jsonCrushed: number;
+  assistantCompressed: number;
   ccrStored: number;
 }
 
@@ -28,6 +29,8 @@ const NEVER_DEDUP = new Set(["read", "bash", "grep", "glob", "find", "search"]);
 
 const ERROR_PURGE_TURN_THRESHOLD = 4;
 const PROTECTED_HEAD_SINGLE = 2;
+const ASSISTANT_COMPRESS_MIN_LENGTH = 500;
+const ASSISTANT_COMPRESS_SAVINGS_RATIO = 0.6;
 
 function simpleHash(s: string): string {
   const len = s.length;
@@ -43,6 +46,32 @@ function simpleHash(s: string): string {
   return `${len}:${h.toString(36)}`;
 }
 
+// LLMLingua selective compression: preserve structure, compress prose
+function compressAssistantText(text: string): string {
+  if (text.length < ASSISTANT_COMPRESS_MIN_LENGTH) return text;
+
+  const lines = text.split("\n");
+  const head = 3;
+  const tail = 3;
+  const kept: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (i < head || i >= lines.length - tail) { kept.push(line); continue; }
+    if (/^#{1,3}\s/.test(line) ||
+        /error|fail|warning|critical|important/i.test(line) ||
+        /^\s*[-*]\s/.test(line) ||
+        /^\s*\d+\.\s/.test(line) ||
+        line.trim().startsWith("```") ||
+        /^\/[^\s:]+/.test(line)) {
+      kept.push(line);
+    }
+  }
+
+  const result = kept.join("\n");
+  return result.length < text.length * ASSISTANT_COMPRESS_SAVINGS_RATIO ? result : text;
+}
+
 export function singlePassCompress(
   messages: Message[],
   state: PluginState,
@@ -53,6 +82,7 @@ export function singlePassCompress(
     errorPurge: 0,
     toolOutputCompressed: 0,
     jsonCrushed: 0,
+    assistantCompressed: 0,
     ccrStored: 0,
   };
 
@@ -146,6 +176,23 @@ export function singlePassCompress(
           const hash = ccrStore(state, output, crushed, toolName, callID);
           toolState["output"] = ccrInjectMarker(crushed, hash);
           stats.jsonCrushed++;
+        }
+      }
+    }
+
+    // === Assistant text compression (only outside protected tail) ===
+    if (i < protectedTail && msg.info.role === "assistant") {
+      for (let j = msg.parts.length - 1; j >= 0; j--) {
+        const part = msg.parts[j];
+        if (typeof part !== "object" || part === null) continue;
+        const p = part as Record<string, unknown>;
+        if (p["type"] !== "text") continue;
+        const text = p["text"];
+        if (typeof text !== "string") continue;
+        const compressed = compressAssistantText(text);
+        if (compressed !== text) {
+          p["text"] = compressed;
+          stats.assistantCompressed++;
         }
       }
     }

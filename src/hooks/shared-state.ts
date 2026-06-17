@@ -73,6 +73,7 @@ export interface DeepCompressionStats {
   errorPurge: number;
   toolOutputCompressed: number;
   jsonCrushed: number;
+  assistantCompressed: number;
   ccrStored: number;
   nudgeInjected: boolean;
   pressureLevel: "low" | "medium" | "high";

@@ -1,6 +1,6 @@
 {
   "name": "@bd7pil/opencode-deep-memory",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Persistent context intelligence for OpenCode — cross-session memory, compaction checkpoints, context reconstruction.",
   "type": "module",
   "main": "dist/index.js",

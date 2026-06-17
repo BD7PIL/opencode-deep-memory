@@ -32,6 +32,7 @@ import { createCompactingHandler } from "./hooks/compacting.js";
 import { createMessagesTransformHandler } from "./hooks/messages-transform.js";
 import { createNotifyHandler } from "./hooks/notify.js";
 import { calibrateFromCompaction, getCalibratedMaxContext } from "./compress/pressure.js";
+import { lookupModelLimit } from "./shared/model-limits.js";
 import { runEnrichment } from "./extract/enrich.js";
 import { RepoMapTracker } from "./repomap/tracker.js";
 import { getLanguage } from "./repomap/extractor.js";
@@ -65,11 +66,15 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
       const defaultModel = configResult.data?.model;
       if (typeof defaultModel === "string" && defaultModel.includes("/")) {
         const slashIdx = defaultModel.indexOf("/");
-        state.recordFallbackModel({
-          providerID: defaultModel.slice(0, slashIdx),
-          modelID: defaultModel.slice(slashIdx + 1),
-        });
-        logger.debug("resolved fallback model from config", { defaultModel });
+        const providerID = defaultModel.slice(0, slashIdx);
+        const modelID = defaultModel.slice(slashIdx + 1);
+        state.recordFallbackModel({ providerID, modelID });
+
+        const limit = lookupModelLimit(modelID);
+        if (limit) {
+          state.setModelContextWindow(limit);
+          logger.debug("resolved model context window", { modelID, limit });
+        }
       }
     }).catch((err) => {
       logger.debug("config.get failed, dream/distill will omit model", {

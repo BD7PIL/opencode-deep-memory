@@ -7,13 +7,19 @@ export interface PressureInfo {
   maxContext: number;
 }
 
-const FALLBACK_MAX_CONTEXT = 128000;
+const FALLBACK_MAX_CONTEXT = 1_000_000;
 const OPENCODE_COMPACTION_RATIO = 0.75;
 
-const THRESHOLDS = {
-  medium: 0.20,
-  high: 0.40,
-} as const;
+// Absolute token thresholds (not percentage-based)
+// Percentage thresholds fail for large context windows:
+//   200K context × 15% =  30K (too early)
+//   1M context   × 15% = 150K (too late)
+// Absolute thresholds behave consistently:
+//   200K context: 50K/200K = 25% (reasonable)
+//   1M context:   50K/1M   =  5% (reasonable)
+// Based on Focus Agent paper (arXiv 2601.07190): post-compression context ~70K
+const PRESSURE_MEDIUM_TOKENS = 50_000;
+const PRESSURE_HIGH_TOKENS = 150_000;
 
 let calibratedMaxContext = 0;
 
@@ -72,31 +78,37 @@ export function extractTokensFromMessages(messages: Array<{ info: { role: string
 }
 
 export function extractInputTokensFromMessages(messages: Array<{ parts: unknown[] }>): number {
+  // Sum input + cached from the latest step-finish — this represents the
+  // total context window usage (fresh input + cached prefix).
+  // Example: 7K input + 177K cache = 184K total context sent to model.
+  let best = 0;
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     for (const part of msg.parts) {
       if (typeof part !== "object" || part === null) continue;
       const p = part as Record<string, unknown>;
       if (p["type"] === "step-finish") {
-        const tokens = (p as { tokens?: { input?: number } }).tokens;
-        if (tokens?.input && tokens.input > 0) {
-          return tokens.input;
-        }
+        const tokens = p as { tokens?: { input?: number; cached?: number } };
+        const input = tokens.tokens?.input ?? 0;
+        const cached = tokens.tokens?.cached ?? 0;
+        const total = input + cached;
+        if (total > best) best = total;
+        if (best > 0) return best;
       }
     }
   }
-  return 0;
+  return best;
 }
 
 export function detectPressure(messages: Array<{ info: { role: string }; parts: unknown[] }>, modelContextWindow?: number): PressureInfo {
   const ctx = maxContextFrom(modelContextWindow || 0);
   const inputTokens = extractInputTokensFromMessages(messages);
-  const estimated = inputTokens > 0 ? inputTokens : extractTokensFromMessages(messages);
+  const estimated = inputTokens > 0 ? inputTokens : 0;
   const ratio = Math.min(estimated / ctx, 1.0);
 
   let level: PressureLevel;
-  if (ratio >= THRESHOLDS.high) level = "high";
-  else if (ratio >= THRESHOLDS.medium) level = "medium";
+  if (estimated >= PRESSURE_HIGH_TOKENS) level = "high";
+  else if (estimated >= PRESSURE_MEDIUM_TOKENS) level = "medium";
   else level = "low";
 
   return { level, ratio, estimatedTokens: estimated, maxContext: ctx };

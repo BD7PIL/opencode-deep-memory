@@ -65,6 +65,7 @@ export function runCompressionPipeline(ctx: PipelineContext): PipelineResult {
     errorPurge: spStats.errorPurge,
     toolOutputCompressed: spStats.toolOutputCompressed,
     jsonCrushed: spStats.jsonCrushed,
+    assistantCompressed: spStats.assistantCompressed,
     ccrStored: spStats.ccrStored,
     nudgeInjected: false,
     pressureLevel: pressure.level,
@@ -92,7 +93,7 @@ export function runCompressionPipeline(ctx: PipelineContext): PipelineResult {
   }
 
   const active = stats.toolDedup > 0 || stats.errorPurge > 0 || stats.toolOutputCompressed > 0 ||
-    stats.jsonCrushed > 0 || stats.nudgeInjected;
+    stats.jsonCrushed > 0 || stats.assistantCompressed > 0 || stats.nudgeInjected;
   if (active) {
     logger?.debug("compress: pipeline result", { ...stats });
   } else {

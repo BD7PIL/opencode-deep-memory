@@ -237,7 +237,7 @@ export function createMessagesTransformHandler(
 
     const ds = pipelineResult.stats;
     if (ds.toolDedup > 0 || ds.errorPurge > 0 || ds.toolOutputCompressed > 0 ||
-        ds.jsonCrushed > 0 || ds.nudgeInjected) {
+        ds.jsonCrushed > 0 || ds.assistantCompressed > 0 || ds.nudgeInjected) {
       logger?.debug("messages.transform: deep compression", { ...ds });
       state.mergeNotify({
         compression: stats,
