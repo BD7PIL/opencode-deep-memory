@@ -177,58 +177,38 @@ npm run verify   # typecheck + test (363) + build + smoke (49)
 
 ## Acknowledgments
 
-**[MiMo-Code][]** — a terminal-native AI coding assistant with persistent memory that keeps a
-deep understanding of your project across sessions while continuously improving itself.
+**[DCP][]** — Dynamic Context Pruning for OpenCode. Tool dedup, error purge, and nudge system.
 
-**[Magic Context][]** — unbounded context. Memory that manages itself. One session, for life.
-The hippocampus for coding agents, part of CortexKit.
+**[Headroom][]** — JSON array crush and CCR (Compress-Cache-Retrieve).
 
-**[Aider][]** — AI pair programming in your terminal. Lets you pair program with LLMs to start
-a new project or build on your existing codebase.
+**[Edgee][]** — Per-tool compression strategies (read, bash, grep, glob).
 
-**[Roo Code][]** — a whole dev team of AI agents in your code editor.
+**[Contextomizer][]** — Content type detection pipeline.
 
-**[Continue][]** — pioneering open-source coding agent, available as a CLI, VS Code extension,
-and JetBrains plugin.
+**[Focus Agent][]** — Absolute token thresholds and assistant text compression research.
 
-**[OpenHands][]** — Code Less, Make More. A community focused on AI-driven development.
+**[LLMLingua][]** — Selective compression: preserve structure, compress prose.
 
-**[Plandex][]** — an AI coding agent designed for large tasks and real world projects.
+**[Codex CLI][]** — Handoff prefix pattern for compaction continuity.
 
-**[DCP][]** — Dynamic Context Pruning for OpenCode. Our tool deduplication, error purging,
-and nudge system are inspired by DCP's architecture.
+**[Google ADK][]** — Append-only event compaction architecture.
 
-**[Headroom][]** — compress tool outputs, logs, files, RAG chunks for AI agents.
-Our JSON array crush and CCR (Compress-Cache-Retrieve) are derived from Headroom's SmartCrusher.
+**[Hermes][]** — 8-section structured compaction prompt design.
 
-**[Edgee][]** — agent gateway that compresses tokens before LLM providers.
-Our per-tool compression strategies (read, bash, grep, glob) are inspired by Edgee's approach.
+**[MiMo-Code][]** — Terminal-native AI coding assistant with persistent memory.
 
-**[Contextomizer][]** — ultra-fast deterministic library for transforming bloated tool outputs.
-Our content type detection pipeline is inspired by Contextomizer's approach.
+**[Magic Context][]** — Unbounded context for coding agents.
 
-**[Focus Agent][]** — autonomous memory management for coding agents.
-Our absolute token thresholds and assistant text compression strategy are based on Focus Agent's research.
+**[Aider][]** — AI pair programming in your terminal.
 
-**[LLMLingua][]** — prompt compression for LLMs.
-Our selective assistant text compression (preserve structure, compress prose) is inspired by LLMLingua's approach.
+**[Roo Code][]** — A whole dev team of AI agents in your code editor.
 
-**[Codex CLI][]** — OpenAI's coding agent.
-Our handoff prefix pattern (telling the LLM it's resuming a prior task) is based on Codex CLI's compaction protocol.
+**[Continue][]** — Pioneering open-source coding agent.
 
-**[Google ADK][]** — Agent Development Kit with append-only event compaction.
-Our structured compaction prompt (Hermes-8 sections) is inspired by ADK's compaction architecture.
+**[OpenHands][]** — Code Less, Make More.
 
-**[Hermes][]** — production-grade compaction prompt design.
-Our 8-section checkpoint template follows Hermes's structured summary format.
+**[Plandex][]** — AI coding agent for large tasks and real world projects.
 
-[MiMo-Code]: https://github.com/XiaomiMiMo/MiMo-Code
-[Magic Context]: https://github.com/cortexkit/magic-context
-[Aider]: https://github.com/Aider-AI/aider
-[Roo Code]: https://github.com/RooCodeInc/Roo-Code
-[Continue]: https://github.com/continuedev/continue
-[OpenHands]: https://github.com/All-Hands-AI/OpenHands
-[Plandex]: https://github.com/plandex-ai/plandex
 [DCP]: https://github.com/Opencode-DCP/opencode-dynamic-context-pruning
 [Headroom]: https://github.com/chopratejas/headroom
 [Edgee]: https://github.com/edgee-ai/edgee
@@ -238,6 +218,13 @@ Our 8-section checkpoint template follows Hermes's structured summary format.
 [Codex CLI]: https://github.com/openai/codex
 [Google ADK]: https://github.com/google/adk-python
 [Hermes]: https://github.com/NousResearch/hermes-agent
+[MiMo-Code]: https://github.com/XiaomiMiMo/MiMo-Code
+[Magic Context]: https://github.com/cortexkit/magic-context
+[Aider]: https://github.com/Aider-AI/aider
+[Roo Code]: https://github.com/RooCodeInc/Roo-Code
+[Continue]: https://github.com/continuedev/continue
+[OpenHands]: https://github.com/All-Hands-AI/OpenHands
+[Plandex]: https://github.com/plandex-ai/plandex
 
 ## License
 

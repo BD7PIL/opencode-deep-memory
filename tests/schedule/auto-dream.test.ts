@@ -220,6 +220,49 @@ describe("handleSessionCreatedForDream", () => {
     expect(schedule.queuedDreamReason).toBeUndefined();
   });
 
+  it("bootstraps MEMORY.md from notes.md when MEMORY.md is missing", async () => {
+    ensureNotesExists(10); // >= 5 lines, no MEMORY.md
+    const sevenDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+    writeSchedule({ lastDream: sevenDaysAgo, lastDistill: null });
+
+    const memoryPath = memoryFilePath("project", "memory", projectPath);
+    expect(fs.existsSync(memoryPath)).toBe(false);
+
+    await handleSessionCreatedForDream({
+      event: makeEvent(),
+      config: { client: {} as any, projectPath }, // eslint-disable-line @typescript-eslint/no-explicit-any
+    });
+
+    // MEMORY.md should have been bootstrapped from notes.md
+    expect(fs.existsSync(memoryPath)).toBe(true);
+    const content = fs.readFileSync(memoryPath, "utf8");
+    expect(content).toContain("line 1");
+    expect(content.length).toBeGreaterThan(50);
+
+    // Dream should have been spawned
+    await vi.waitFor(() => {
+      expect(runDream).toHaveBeenCalled();
+    });
+  });
+
+  it("does NOT bootstrap when notes.md has fewer than 5 lines", async () => {
+    ensureNotesExists(3); // < 5 lines, no MEMORY.md
+    const sevenDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+    writeSchedule({ lastDream: sevenDaysAgo, lastDistill: null });
+
+    const memoryPath = memoryFilePath("project", "memory", projectPath);
+    expect(fs.existsSync(memoryPath)).toBe(false);
+
+    await handleSessionCreatedForDream({
+      event: makeEvent(),
+      config: { client: {} as any, projectPath }, // eslint-disable-line @typescript-eslint/no-explicit-any
+    });
+
+    // MEMORY.md should NOT have been created
+    expect(fs.existsSync(memoryPath)).toBe(false);
+    expect(runDream).not.toHaveBeenCalled();
+  });
+
   it("updates lastDream IMMEDIATELY before spawning dream (file modified before promptAsync)", async () => {
     ensureMemoryExists();
     ensureNotesExists();
