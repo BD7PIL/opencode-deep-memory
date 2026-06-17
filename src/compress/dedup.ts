@@ -81,9 +81,15 @@ export function deduplicateToolOutputs(
 }
 
 function simpleHash(s: string): string {
-  let h = 0;
-  for (let i = 0; i < Math.min(s.length, 1000); i++) {
+  const len = s.length;
+  const sampleSize = 500;
+  let h = len;
+  for (let i = 0; i < Math.min(len, sampleSize); i++) {
     h = (h * 31 + s.charCodeAt(i)) | 0;
   }
-  return h.toString(36);
+  const tailStart = Math.max(sampleSize, len - sampleSize);
+  for (let i = tailStart; i < len; i++) {
+    h = (h * 31 + s.charCodeAt(i)) | 0;
+  }
+  return `${len}:${h.toString(36)}`;
 }

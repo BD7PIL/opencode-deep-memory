@@ -259,6 +259,10 @@ export class PluginState {
   }
 
   ccStore(hash: string, entry: CCRCacheEntry): void {
+    const now = Date.now();
+    for (const [k, v] of this._ccrCache) {
+      if (now - v.createdAt > 300000) this._ccrCache.delete(k);
+    }
     if (this._ccrCache.size > 200) {
       const oldest = [...this._ccrCache.entries()]
         .sort((a, b) => a[1].createdAt - b[1].createdAt)

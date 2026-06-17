@@ -17,7 +17,8 @@ export function pruneOldMessages(
 
       const text = p["text"] as string;
       if (text.length < 500) continue;
-      if (text === "[cleared]" || text === "[stripped]" || text.startsWith("[compressed")) continue;
+      if (text === "[cleared]" || text === "[stripped]") continue;
+      if (text.includes("[compressed from")) continue;
 
       const keyInfo = extractKeyInfo(text);
       if (keyInfo.length < text.length * 0.6) {
