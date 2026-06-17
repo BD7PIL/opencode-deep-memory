@@ -56,8 +56,8 @@ describe("createCompactingHandler", () => {
     expect(content).toContain("I recommend");
 
     // context hint should be pushed
-    expect(output.context.length).toBe(1);
-    expect(output.context[0]).toContain("Prior conversation archived");
+    expect(output.context.length).toBe(2);
+    expect(output.context[1]).toContain("Prior conversation archived");
   });
 
   it("writes raw checkpoint JSON alongside checkpoint.md", async () => {

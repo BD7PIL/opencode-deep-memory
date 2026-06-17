@@ -19,6 +19,7 @@ import { extractHeuristics } from "../extract/heuristics.js";
 import { renderCheckpoint, writeCheckpoint } from "../extract/checkpoint-writer.js";
 import { estimateTokensSum } from "../shared/tokens.js";
 import { readFile } from "node:fs/promises";
+import { HANDOFF_PREFIX, STRUCTURED_COMPACTION_PROMPT } from "../extract/summarize.js";
 
 /** Minimal client shape needed — avoids importing full PluginInput type. */
 interface SessionClient {
@@ -104,7 +105,12 @@ export function createCompactingHandler(
       // Step 4: Signal that enrichment should run on next idle
       state.setPendingEnrichment(sessionID);
 
-      // Step 5: Push context hint (optional — won't break if omitted)
+      // Step 5: Inject structured compaction prompt + handoff prefix
+      // Only on sessions with enough messages to justify structured summary
+      if (capture.messageCount >= 20) {
+        output.prompt = STRUCTURED_COMPACTION_PROMPT;
+      }
+      output.context.push(HANDOFF_PREFIX);
       output.context.push(
         `Prior conversation archived to ${checkpointPath}`,
       );
