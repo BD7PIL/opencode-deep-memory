@@ -125,7 +125,7 @@ export function createMessagesTransformHandler(
   state: PluginState,
   logger?: Logger,
 ): NonNullable<Hooks["experimental.chat.messages.transform"]> {
-  return async (_input, output) => {
+  return async (input, output) => {
     const messages = output.messages;
     if (messages.length <= KEEP_RECENT) return;
 
@@ -231,6 +231,7 @@ export function createMessagesTransformHandler(
     const pipelineResult = runCompressionPipeline({
       messages: output.messages as never,
       state,
+      sessionID: (input as Record<string, unknown>)["sessionID"] as string | undefined,
       logger,
     });
 

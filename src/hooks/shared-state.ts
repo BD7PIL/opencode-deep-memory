@@ -101,7 +101,8 @@ export class PluginState {
   private _toolSignatures = new Map<string, string>();
   private _ccrCache = new Map<string, CCRCacheEntry>();
   private _lastInputTokens = 0;
-  private _lastNudgeMessageCount = 0;
+  private _lastNudgeMessageCount = new Map<string, number>();
+  private _lastCCRCleanup = 0;
   private _modelContextWindow = 0;
 
   agentOf(sessionID: string): string | undefined {
@@ -116,6 +117,7 @@ export class PluginState {
     this._agents.delete(sessionID);
     this._models.delete(sessionID);
     this._lastUserText.delete(sessionID);
+    this._lastNudgeMessageCount.delete(sessionID);
   }
 
   recordModel(sessionID: string, model: { providerID: string; modelID: string }): void {
@@ -260,14 +262,18 @@ export class PluginState {
 
   ccStore(hash: string, entry: CCRCacheEntry): void {
     const now = Date.now();
-    for (const [k, v] of this._ccrCache) {
-      if (now - v.createdAt > 300000) this._ccrCache.delete(k);
-    }
-    if (this._ccrCache.size > 200) {
-      const oldest = [...this._ccrCache.entries()]
-        .sort((a, b) => a[1].createdAt - b[1].createdAt)
-        .slice(0, 50);
-      for (const [k] of oldest) this._ccrCache.delete(k);
+    // Lazy eviction: sweep only every 30s to amortize cost
+    if (now - this._lastCCRCleanup > 30000) {
+      for (const [k, v] of this._ccrCache) {
+        if (now - v.createdAt > 300000) this._ccrCache.delete(k);
+      }
+      // LRU: if still over cap, delete oldest N (Map iteration order = insertion order)
+      if (this._ccrCache.size > 200) {
+        const excess = this._ccrCache.size - 150;
+        const oldest = [...this._ccrCache.keys()].slice(0, excess);
+        for (const k of oldest) this._ccrCache.delete(k);
+      }
+      this._lastCCRCleanup = now;
     }
     this._ccrCache.set(hash, entry);
   }
@@ -284,12 +290,13 @@ export class PluginState {
     return this._lastInputTokens;
   }
 
-  recordNudge(messageCount: number): void {
-    this._lastNudgeMessageCount = messageCount;
+  recordNudge(sessionID: string, messageCount: number): void {
+    this._lastNudgeMessageCount.set(sessionID, messageCount);
   }
 
-  messagesSinceLastNudge(currentMessageCount: number): number {
-    return currentMessageCount - this._lastNudgeMessageCount;
+  messagesSinceLastNudge(sessionID: string, currentMessageCount: number): number {
+    const last = this._lastNudgeMessageCount.get(sessionID);
+    return last != null ? currentMessageCount - last : Number.POSITIVE_INFINITY;
   }
 
   setModelContextWindow(tokens: number): void {

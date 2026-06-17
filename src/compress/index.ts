@@ -2,36 +2,19 @@ import type { PluginState } from "../hooks/shared-state.js";
 import type { Logger } from "../shared/log.js";
 import type { DeepCompressionStats } from "../hooks/shared-state.js";
 import { detectPressure } from "./pressure.js";
-import { deduplicateToolOutputs } from "./dedup.js";
-import { purgeOldErrors } from "./error-purge.js";
-import { compressToolOutput } from "./tool-compress.js";
-import { crushJsonArray } from "./json-crush.js";
-import { ccrStore, ccrInjectMarker } from "./ccr.js";
 import { shouldInjectNudge, buildNudgeText } from "./nudge.js";
 import { detectMemoryNudge, buildMemoryNudge } from "./memory-nudge.js";
-import { detectContentType } from "./detector.js";
-
-interface MessagePart {
-  type?: string;
-  text?: string;
-  tool?: string;
-  callID?: string;
-  state?: {
-    status?: string;
-    output?: string;
-    error?: string;
-    input?: Record<string, unknown>;
-  };
-}
+import { singlePassCompress, type SinglePassStats } from "./single-pass.js";
 
 interface Message {
   info: { role: string };
-  parts: MessagePart[];
+  parts: unknown[];
 }
 
 interface PipelineContext {
   messages: Message[];
   state: PluginState;
+  sessionID?: string;
   logger?: Logger;
 }
 
@@ -39,42 +22,71 @@ interface PipelineResult {
   stats: DeepCompressionStats;
 }
 
+const KEEP_RECENT_TOKENS = 4000;
+
+function estimateMessageTokens(msg: Message): number {
+  let t = 0;
+  for (const part of msg.parts) {
+    if (typeof part !== "object" || part === null) continue;
+    const p = part as Record<string, unknown>;
+    const text = typeof p["text"] === "string" ? p["text"] : "";
+    if (p["type"] === "tool") {
+      const s = p["state"] as Record<string, unknown> | undefined;
+      const out = typeof s?.["output"] === "string" ? s["output"] : "";
+      t += Math.ceil((text.length + out.length) / 4);
+    } else {
+      t += Math.ceil(text.length / 4);
+    }
+  }
+  return t;
+}
+
+function computeProtectedTail(messages: Message[]): number {
+  let tokens = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    tokens += estimateMessageTokens(messages[i]);
+    if (tokens >= KEEP_RECENT_TOKENS) return i;
+  }
+  return 0;
+}
+
 export function runCompressionPipeline(ctx: PipelineContext): PipelineResult {
-  const { messages, state, logger } = ctx;
+  const { messages, state, sessionID, logger } = ctx;
   const pressure = detectPressure(messages as Array<{ info: { role: string }; parts: unknown[] }>, state.getModelContextWindow());
   state.recordInputTokens(pressure.estimatedTokens);
 
+  const protectedTail = computeProtectedTail(messages);
+
+  // Single pass: dedup + error purge + tool output compress + JSON crush
+  const spStats: SinglePassStats = singlePassCompress(messages, state, protectedTail);
+
   const stats: DeepCompressionStats = {
-    toolDedup: 0,
-    errorPurge: 0,
-    toolOutputCompressed: 0,
-    jsonCrushed: 0,
-    ccrStored: 0,
+    toolDedup: spStats.toolDedup,
+    errorPurge: spStats.errorPurge,
+    toolOutputCompressed: spStats.toolOutputCompressed,
+    jsonCrushed: spStats.jsonCrushed,
+    ccrStored: spStats.ccrStored,
     nudgeInjected: false,
     pressureLevel: pressure.level,
     estimatedTokens: pressure.estimatedTokens,
   };
 
-  // === Always run (no threshold, every turn) ===
-  stats.toolDedup = deduplicateToolOutputs(messages, state);
-  stats.errorPurge = purgeOldErrors(messages);
-  stats.jsonCrushed = crushJsonToolOutputs(messages, state);
-  stats.toolOutputCompressed = compressOldToolOutputs(messages, state);
+  const sid = sessionID || "default";
 
-  // === Nudge: only when pressure ≥ 50% ===
-  const messagesSinceNudge = state.messagesSinceLastNudge(messages.length);
+  // Nudge: only when pressure ≥ 50%
+  const messagesSinceNudge = state.messagesSinceLastNudge(sid, messages.length);
   if (shouldInjectNudge(pressure.level, messagesSinceNudge)) {
     if (injectIntoLastAssistant(messages, buildNudgeText(pressure.level))) {
       stats.nudgeInjected = true;
-      state.recordNudge(messages.length);
+      state.recordNudge(sid, messages.length);
     }
   }
 
-  // === Memory nudge: always check for memory-worthy patterns ===
-  const memoryNudge = detectMemoryNudge(messages, state.messagesSinceLastNudge(messages.length));
+  // Memory nudge
+  const memoryNudge = detectMemoryNudge(messages as never, state.messagesSinceLastNudge(sid, messages.length));
   if (memoryNudge.injected) {
     if (injectIntoLastAssistant(messages, buildMemoryNudge(memoryNudge.type!))) {
-      state.recordNudge(messages.length);
+      state.recordNudge(sid, messages.length);
       logger?.debug("compress: memory nudge", { type: memoryNudge.type });
     }
   }
@@ -93,75 +105,13 @@ function injectIntoLastAssistant(messages: Message[], text: string): boolean {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.info.role !== "assistant") continue;
-    const textParts = msg.parts.filter(
-      (p): p is MessagePart => typeof p === "object" && p !== null && p.type === "text"
-    );
-    const lastTextPart = textParts[textParts.length - 1];
-    if (lastTextPart && typeof lastTextPart.text === "string") {
-      lastTextPart.text += text;
-      return true;
+    for (let j = msg.parts.length - 1; j >= 0; j--) {
+      const p = msg.parts[j] as Record<string, unknown>;
+      if (p["type"] === "text" && typeof p["text"] === "string") {
+        (p["text"] as string) += text;
+        return true;
+      }
     }
   }
   return false;
-}
-
-function compressOldToolOutputs(messages: Message[], state: PluginState): number {
-  let compressed = 0;
-  const protectedTail = messages.length - 8;
-
-  for (let i = 3; i < protectedTail; i++) {
-    const msg = messages[i];
-    for (const part of msg.parts) {
-      if (typeof part !== "object" || part === null) continue;
-      const p = part as MessagePart;
-      if (p.type !== "tool") continue;
-      if (p.state?.status !== "completed") continue;
-      if (!p.state.output) continue;
-      if (p.state.output === "[superseded by duplicate call]") continue;
-      if (p.state.output.includes("[ccr:")) continue;
-
-      const toolName = p.tool || "unknown";
-      const output = p.state.output;
-      const result = compressToolOutput(toolName, output);
-
-      if (result.length < output.length * 0.7) {
-        const hash = ccrStore(state, output, result, toolName, p.callID);
-        p.state.output = ccrInjectMarker(result, hash);
-        compressed++;
-      }
-    }
-  }
-
-  return compressed;
-}
-
-function crushJsonToolOutputs(messages: Message[], state: PluginState): number {
-  let crushed = 0;
-  const protectedTail = messages.length - 8;
-
-  for (let i = 3; i < protectedTail; i++) {
-    const msg = messages[i];
-    for (const part of msg.parts) {
-      if (typeof part !== "object" || part === null) continue;
-      const p = part as MessagePart;
-      if (p.type !== "tool") continue;
-      if (p.state?.status !== "completed") continue;
-      if (!p.state.output) continue;
-      if (p.state.output.startsWith("[superseded")) continue;
-      if (p.state.output.includes("[ccr:")) continue;
-
-      if (detectContentType(p.state.output) !== "json") continue;
-
-      const original = p.state.output;
-      const crushed_output = crushJsonArray(original);
-
-      if (crushed_output.length < original.length * 0.7) {
-        const hash = ccrStore(state, original, crushed_output, p.tool, p.callID);
-        p.state.output = ccrInjectMarker(crushed_output, hash);
-        crushed++;
-      }
-    }
-  }
-
-  return crushed;
 }
