@@ -23,7 +23,7 @@ const PROTECTED_TOOLS = new Set([
   "question", "edit", "write", "todowrite",
   "memory_store", "memory_search", "memory_forget", "memory_expand",
   "deep_expand",
-  "task", "skill",
+  "skill",
 ]);
 
 const NEVER_DEDUP = new Set(["read", "bash", "grep", "glob", "find", "search"]);
