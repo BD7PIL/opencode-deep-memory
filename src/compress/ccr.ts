@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { PluginState } from "../hooks/shared-state.js";
 
-const CCR_TTL_MS = 5 * 60 * 1000;
+const CCR_TTL_MS = 30 * 60 * 1000;
 
 export function ccrStore(
   state: PluginState,

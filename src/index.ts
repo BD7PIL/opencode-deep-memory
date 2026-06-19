@@ -263,13 +263,19 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
     tool: { ...memoryTools, deep_expand: createDeepExpandTool(state) },
 
     "tool.execute.after": async (input, output) => {
-      if (input.tool !== "read") return;
       const filePath = (input.args as { path?: string; filePath?: string })?.path
         ?? (input.args as { filePath?: string })?.filePath;
       if (!filePath) return;
-      const lang = getLanguage(filePath);
-      if (!lang) return;
-      tracker.recordRead(filePath, output.output || "");
+
+      if (input.tool === "read") {
+        const lang = getLanguage(filePath);
+        if (!lang) return;
+        tracker.recordRead(filePath, output.output || "");
+      }
+
+      if (input.tool === "edit" || input.tool === "write") {
+        state.trackEdit(filePath);
+      }
     },
 
     "experimental.session.compacting": createCompactingHandler({

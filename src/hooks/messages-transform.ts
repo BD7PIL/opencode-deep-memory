@@ -246,6 +246,28 @@ export function createMessagesTransformHandler(
         protectedHead: PROTECTED_HEAD,
         protectedTail: KEEP_RECENT,
       });
+
+      // Proactive re-read: if compression modified content, remind the agent
+      // to re-read recently edited files (LSP diagnostics may have shifted).
+      const recentEdits = state.getRecentEdits();
+      if (recentEdits.length > 0) {
+        const fileList = recentEdits.slice(0, 5).join(", ");
+        const nudge = "\n\n<dm-nudge level=\"medium\">Context was compressed. Recent files may have shifted: " +
+          fileList +
+          ". Use `read` to re-verify if needed.</dm-nudge>";
+        for (let k = output.messages.length - 1; k >= 0; k--) {
+          const msg = output.messages[k] as { info: { role: string }; parts: unknown[] };
+          if (msg.info.role !== "assistant") continue;
+          for (const part of msg.parts) {
+            const p = part as Record<string, unknown>;
+            if (p["type"] === "text" && typeof p["text"] === "string") {
+              (p as { text: string }).text += nudge;
+              break;
+            }
+          }
+          break;
+        }
+      }
     } else if (Object.values(stats).some(v => v > 0)) {
       state.mergeNotify({
         compression: stats,

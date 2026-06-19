@@ -106,6 +106,7 @@ export class PluginState {
   private _lastMemoryNudgeMessageCount = new Map<string, number>();
   private _lastCCRCleanup = 0;
   private _modelContextWindow = 0;
+  private _recentEdits = new Set<string>();
 
   agentOf(sessionID: string): string | undefined {
     return this._agents.get(sessionID);
@@ -313,6 +314,14 @@ export class PluginState {
 
   getModelContextWindow(): number {
     return this._modelContextWindow;
+  }
+
+  trackEdit(filePath: string): void {
+    if (filePath) this._recentEdits.add(filePath);
+  }
+
+  getRecentEdits(): string[] {
+    return Array.from(this._recentEdits);
   }
 }
 

@@ -61,7 +61,7 @@ OpenCode auto-installs on startup. Memory appears at `.deep-memory/` in your pro
 
 ## Context compression
 
-Two layers, fully automatic, no LLM calls.
+Three layers, fully automatic, no LLM calls.
 
 ### Layer 1: Deterministic stripping (always active)
 
@@ -92,11 +92,16 @@ Thresholds are absolute, not percentage-based — they work consistently across 
 | Command outputs | Keep errors + tail | [Edgee][] |
 | Search results | Keep top-20, group by file | [Edgee][] |
 | JSON arrays | Head + dedup middle + tail | [Headroom][] |
+| Subagent output | Headers + key lines + tail with [ccr:] preservation | [Claude Code][] |
+| Skill output | Frontmatter + MUST rules + structure headers | [Claude Code][] |
+| Nested JSON objects | Compress child arrays >30 items | This project |
 | Old assistant text | Preserve structure, compress prose | [LLMLingua][] |
 
-All compressed content is **reversible** via CCR (Compress-Cache-Retrieve) — originals cached with SHA-256 hash, retrievable via `deep_expand` tool.
+All compressed content is **reversible** via CCR (Compress-Cache-Retrieve) — originals cached for 30 minutes with SHA-256 hash, retrievable via `deep_expand` tool. 
 
-**Never touched**: user messages, recent 4K tokens, protected tools (question, edit, write, todowrite, memory_*).
+**No compression** on protected tools: `question`, `edit`, `write`, `todowrite`, `memory_*`, `deep_expand`, `task`, `skill`. These tools' outputs contain verification data (LSP diagnostics, subagent decisions) essential for the agent to function correctly.
+
+**Post-compression re-read**: after compression modifies content, recent modified files are listed in a `<dm-nudge>` so the agent can re-verify if needed — inspired by Claude Code's `onCompact` callback.
 
 ## Memory nudge
 

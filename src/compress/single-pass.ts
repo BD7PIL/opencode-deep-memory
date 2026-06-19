@@ -23,6 +23,7 @@ const PROTECTED_TOOLS = new Set([
   "question", "edit", "write", "todowrite",
   "memory_store", "memory_search", "memory_forget", "memory_expand",
   "deep_expand",
+  "task", "skill",
 ]);
 
 const NEVER_DEDUP = new Set(["read", "bash", "grep", "glob", "find", "search"]);
@@ -107,7 +108,7 @@ export function singlePassCompress(
 
       // === Error purge (age-based, all zones) ===
       const toolState = p["state"] as Record<string, unknown> | undefined;
-      if (toolState?.["status"] === "error") {
+      if (toolState?.["status"] === "error" && !PROTECTED_TOOLS.has(toolName ?? "")) {
         const age = totalMessages - i;
         if (age >= ERROR_PURGE_TURN_THRESHOLD) {
           if (typeof toolState["input"] === "object" && toolState["input"] !== null) {
@@ -159,7 +160,9 @@ export function singlePassCompress(
       }
 
       // === Tool output compression ===
-      if (output.length >= 200) {
+      // PROTECTED_TOOLS (edit/write/etc.) are NEVER compressed — their output
+      // may contain LSP diagnostics or file content the agent needs for verification.
+      if (output.length >= 200 && !PROTECTED_TOOLS.has(toolName)) {
         const result = compressToolOutput(toolName, output);
         if (result.length < output.length * 0.85) {
           const hash = ccrStore(state, output, result, toolName, callID);
@@ -170,7 +173,7 @@ export function singlePassCompress(
       }
 
       // === JSON crush ===
-      if (output.length >= 200 && detectContentType(output) === "json") {
+      if (output.length >= 200 && detectContentType(output) === "json" && !PROTECTED_TOOLS.has(toolName)) {
         const crushed = crushJsonArray(output);
         if (crushed.length < output.length * 0.85) {
           const hash = ccrStore(state, output, crushed, toolName, callID);
