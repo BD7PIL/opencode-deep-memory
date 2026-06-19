@@ -47,7 +47,15 @@ function compressFileRead(output: string): string {
 
 function compressBash(output: string): string {
   const lines = output.split("\n");
-  if (lines.length <= 50) return output;
+  if (lines.length <= 50 && output.length <= 5000) return output;
+
+  // Few lines, many chars: either JSON (delegate) or single long lines (truncate)
+  if (lines.length <= 50) {
+    if (detectContentType(output) === "json") {
+      return compressJsonOutput(output);
+    }
+    return lines.map(l => l.length > MAX_LINE_LENGTH ? l.slice(0, MAX_LINE_LENGTH) + "..." : l).join("\n");
+  }
 
   const errorLines = lines.filter(l => /error|fail|exception|fatal|panic/i.test(l)).slice(0, 5);
   const tail = lines.slice(-30);
