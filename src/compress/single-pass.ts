@@ -52,26 +52,18 @@ function simpleHash(s: string): string {
 function compressAssistantText(text: string): string {
   if (text.length < ASSISTANT_COMPRESS_MIN_LENGTH) return text;
 
+  // Skip texts containing code blocks to avoid empty-block bugs from
+  // nested fence references (e.g. ```mermaid inside a ``` block).
+  if (text.includes("```")) return text;
+
   const lines = text.split("\n");
   const head = 3;
   const tail = 3;
   const kept: string[] = [];
-  let inCodeBlock = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (i < head || i >= lines.length - tail) { kept.push(line); continue; }
-
-    if (line.trim().startsWith("```")) {
-      inCodeBlock = !inCodeBlock;
-      kept.push(line);
-      continue;
-    }
-
-    if (inCodeBlock) {
-      kept.push(line);
-      continue;
-    }
 
     if (/^#{1,3}\s/.test(line) ||
         /error|fail|warning|critical|important/i.test(line) ||
