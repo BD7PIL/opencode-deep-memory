@@ -49,7 +49,9 @@ async function main() {
   console.log();
 
   const mod = await import(`file://${path.resolve("dist/index.js")}`);
-  check("dist/index.js loads", typeof mod.default === "object" && typeof mod.default.server === "function");
+  const isNewFormat = typeof mod.default === "function";
+  const isOldFormat = typeof mod.default === "object" && typeof mod.default.server === "function";
+  check("dist/index.js loads", isNewFormat || isOldFormat);
   const pluginFn = mod.default.server ?? mod.default;
   check("PluginModule.server is callable", typeof pluginFn === "function");
 
