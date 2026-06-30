@@ -47,15 +47,54 @@ function simpleHash(s: string): string {
   return `${len}:${h.toString(36)}`;
 }
 
-// LLMLingua selective compression: preserve structure, compress prose.
-// IMPORTANT: tracks code-block state to keep ALL lines between ``` fences.
-function compressAssistantText(text: string): string {
-  if (text.length < ASSISTANT_COMPRESS_MIN_LENGTH) return text;
+interface TextSegment {
+  type: "prose" | "code";
+  lines: string[];
+}
 
-  // Skip texts containing code blocks to avoid empty-block bugs from
-  // nested fence references (e.g. ```mermaid inside a ``` block).
-  if (text.includes("```")) return text;
+/**
+ * Split text into alternating prose and code segments based on ``` fences.
+ * Code segments include the opening and closing fence lines.
+ * Trailing unterminated code is flushed as a code segment.
+ */
+export function splitByCodeFences(text: string): TextSegment[] {
+  const lines = text.split("\n");
+  const segments: TextSegment[] = [];
+  let current: string[] = [];
+  let inCode = false;
 
+  const flush = (type: "prose" | "code") => {
+    if (current.length > 0) {
+      segments.push({ type, lines: current });
+      current = [];
+    }
+  };
+
+  for (const line of lines) {
+    if (line.trim().startsWith("```")) {
+      if (!inCode) {
+        flush("prose");
+        current.push(line);
+        inCode = true;
+      } else {
+        current.push(line);
+        flush("code");
+        inCode = false;
+      }
+    } else {
+      current.push(line);
+    }
+  }
+  flush(inCode ? "code" : "prose");
+  return segments;
+}
+
+/**
+ * Compress pure prose text (no code blocks).
+ * Keeps head 3 + tail 3 lines, plus structural lines (headings, errors,
+ * list items, numbered lists, file paths).
+ */
+export function compressPureProse(text: string): string {
   const lines = text.split("\n");
   const head = 3;
   const tail = 3;
@@ -73,10 +112,50 @@ function compressAssistantText(text: string): string {
       kept.push(line);
     }
   }
-
-  const result = kept.join("\n");
-  return result.length < text.length * ASSISTANT_COMPRESS_SAVINGS_RATIO ? result : text;
+  return kept.join("\n");
 }
+
+/**
+ * Code-block-aware assistant text compression.
+ *
+ * Splits text into prose/code segments, compresses only prose segments
+ * (preserving all code blocks verbatim), then reassembles. Falls back to
+ * returning original text if code blocks are unbalanced (odd fence count)
+ * to avoid the empty-block bug from malformed/nested fences.
+ *
+ * Replaces the v0.8.7 approach of `if (text.includes("```")) return text;`
+ * which over-skipped: any assistant reply containing a code block was
+ * entirely exempt from compression, even when the surrounding prose was
+ * long enough to safely compress.
+ */
+function compressAssistantText(text: string): string {
+  if (text.length < ASSISTANT_COMPRESS_MIN_LENGTH) return text;
+
+  // Defensive: unbalanced fences → skip entirely (safe fallback like v0.8.7).
+  const fenceCount = (text.match(/^```/gm) ?? []).length;
+  if (fenceCount % 2 !== 0) return text;
+
+  const segments = splitByCodeFences(text);
+  const hasCode = segments.some(s => s.type === "code");
+
+  if (!hasCode) {
+    const result = compressPureProse(text);
+    return result.length < text.length * ASSISTANT_COMPRESS_SAVINGS_RATIO ? result : text;
+  }
+
+  const rebuilt = segments
+    .map(seg => {
+      if (seg.type === "code") return seg.lines.join("\n");
+      const proseText = seg.lines.join("\n");
+      if (proseText.length < ASSISTANT_COMPRESS_MIN_LENGTH) return proseText;
+      return compressPureProse(proseText);
+    })
+    .join("\n");
+
+  return rebuilt.length < text.length * ASSISTANT_COMPRESS_SAVINGS_RATIO ? rebuilt : text;
+}
+
+export { compressAssistantText };
 
 export function singlePassCompress(
   messages: Message[],
@@ -199,8 +278,11 @@ export function singlePassCompress(
         if (typeof text !== "string") continue;
         const compressed = compressAssistantText(text);
         if (compressed !== text) {
-          p["text"] = compressed;
+          const callRef = `assistant-${i}-${j}`;
+          const hash = ccrStore(state, text, compressed, "assistant-text", callRef);
+          p["text"] = ccrInjectMarker(compressed, hash);
           stats.assistantCompressed++;
+          stats.ccrStored++;
         }
       }
     }
