@@ -2,8 +2,6 @@ import type { PluginState } from "../hooks/shared-state.js";
 import type { Logger } from "../shared/log.js";
 import type { DeepCompressionStats } from "../hooks/shared-state.js";
 import { detectPressure } from "./pressure.js";
-import { shouldInjectNudge, buildNudgeText } from "./nudge.js";
-import { detectMemoryNudge, buildMemoryNudge } from "./memory-nudge.js";
 import { singlePassCompress, type SinglePassStats } from "./single-pass.js";
 
 interface Message {
@@ -51,20 +49,19 @@ function computeProtectedTail(messages: Message[]): number {
 }
 
 export function runCompressionPipeline(ctx: PipelineContext): PipelineResult {
-  const { messages, state, sessionID, logger } = ctx;
+  const { messages, state, logger } = ctx;
   const pressure = detectPressure(messages as Array<{ info: { role: string }; parts: unknown[] }>, state.getModelContextWindow());
   state.recordInputTokens(pressure.estimatedTokens);
 
   const protectedTail = computeProtectedTail(messages);
 
-  // Single pass: dedup + error purge + tool output compress + JSON crush
   const spStats: SinglePassStats = singlePassCompress(messages, state, protectedTail);
 
   const stats: DeepCompressionStats = {
     toolDedup: spStats.toolDedup,
     errorPurge: spStats.errorPurge,
     toolOutputCompressed: spStats.toolOutputCompressed,
-    jsonCrushed: spStats.jsonCrushed,
+    jsonCrushed: 0,
     assistantCompressed: spStats.assistantCompressed,
     ccrStored: spStats.ccrStored,
     nudgeInjected: false,
@@ -72,49 +69,12 @@ export function runCompressionPipeline(ctx: PipelineContext): PipelineResult {
     estimatedTokens: pressure.estimatedTokens,
   };
 
-  const sid = sessionID || "default";
-  const currentMsgCount = messages.length;
-
-  // Pressure nudge: only when pressure ≥ high
-  const pressureSince = state.messagesSinceLastNudge(sid, currentMsgCount);
-  if (shouldInjectNudge(pressure.level, pressureSince)) {
-    if (injectIntoLastAssistant(messages, buildNudgeText(pressure.level))) {
-      stats.nudgeInjected = true;
-      state.recordNudge(sid, currentMsgCount);
-    }
-  }
-
-  // Memory nudge: always check, independent cooldown
-  const memorySince = state.messagesSinceLastMemoryNudge(sid, currentMsgCount);
-  const memoryNudge = detectMemoryNudge(messages as never, memorySince);
-  if (memoryNudge.injected) {
-    if (injectIntoLastAssistant(messages, buildMemoryNudge(memoryNudge.type!))) {
-      state.recordMemoryNudge(sid, currentMsgCount);
-      logger?.debug("compress: memory nudge", { type: memoryNudge.type });
-    }
-  }
-
   const active = stats.toolDedup > 0 || stats.errorPurge > 0 || stats.toolOutputCompressed > 0 ||
-    stats.jsonCrushed > 0 || stats.assistantCompressed > 0 || stats.nudgeInjected;
+    stats.assistantCompressed > 0;
   if (active) {
     logger?.debug("compress: pipeline result", { ...stats });
   } else {
     logger?.debug("compress: no action needed", { ratio: pressure.ratio.toFixed(2) });
   }
   return { stats };
-}
-
-function injectIntoLastAssistant(messages: Message[], text: string): boolean {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (msg.info.role !== "assistant") continue;
-    for (let j = msg.parts.length - 1; j >= 0; j--) {
-      const p = msg.parts[j] as Record<string, unknown>;
-      if (p["type"] === "text" && typeof p["text"] === "string") {
-        (p["text"] as string) += text;
-        return true;
-      }
-    }
-  }
-  return false;
 }

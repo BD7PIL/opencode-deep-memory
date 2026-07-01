@@ -3,10 +3,9 @@
  *
  * Wires together all hooks and tools:
  *   - chat.params: record sessionID → agent map
- *   - chat.message: capture keyword-matching user messages to notes.md
- *   - experimental.chat.system.transform: adaptive memory injection
- *   - event: session.created → resume detection + auto-dream scheduling
- *   - tool: memory_search / memory_store / memory_forget
+ *   - experimental.chat.system.transform: V4 frozen TOOL_HINT + mtime-cached MEMORY.md
+ *   - event: session.compacted → pressure calibration + audit log
+ *   - tool: memory_search / memory_store / memory_forget / memory_expand / context_compress
  *
  * Storage: <data>/local-memory/{global,projects/<hash>}/...
  * See DESIGN.md for full architecture.
@@ -18,21 +17,17 @@ import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import { createLogger, resolveDataRoot, acquireLock } from "./shared/index.js";
+import { migrateV3toV4 } from "./shared/migrate.js";
 import { projectMemoryDir } from "./shared/paths.js";
 import { createPluginState } from "./hooks/shared-state.js";
 import { createChatParamsHandler } from "./hooks/chat-params.js";
-import { createChatMessageHandler } from "./hooks/chat-message.js";
 import { createSystemTransformHandler } from "./hooks/system-transform.js";
-import { handleSessionCreated as handleResume } from "./schedule/resume.js";
-import { handleSessionCreatedForDream } from "./schedule/auto-dream.js";
-import { handleSessionCreatedForDistill } from "./schedule/auto-distill.js";
 import { SearchService } from "./search/service.js";
 import { createMemoryTools, createDeepExpandTool } from "./tools/index.js";
 import { createCompactingHandler } from "./hooks/compacting.js";
 import { createMessagesTransformHandler } from "./hooks/messages-transform.js";
 import { createNotifyHandler } from "./hooks/notify.js";
 import { calibrateFromCompaction, getCalibratedMaxContext } from "./compress/pressure.js";
-import { runEnrichment } from "./extract/enrich.js";
 import { RepoMapTracker } from "./repomap/tracker.js";
 import { getLanguage } from "./repomap/extractor.js";
 
@@ -51,6 +46,14 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
     dataRoot,
     serverUrl: input.serverUrl.toString(),
   });
+
+  try {
+    await migrateV3toV4(projectPath, logger.for("migrate"));
+  } catch (err) {
+    logger.warn("V3→V4 migration failed (non-blocking)", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   const searchService = new SearchService({
     dataRoot,
@@ -88,7 +91,7 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
     });
   });
 
-  const memoryTools = createMemoryTools(searchService, { projectPath });
+  const memoryTools = createMemoryTools(searchService, state, { projectPath });
   const notify = createNotifyHandler(input.client, logger.for("notify"));
 
   const hooks: Hooks = {
@@ -97,91 +100,21 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
       logger.for("chat-params"),
     ),
 
-    "chat.message": createChatMessageHandler({
-      projectPath,
-      state,
-      logger: logger.for("chat-message"),
-    }),
-
     "experimental.chat.system.transform": createSystemTransformHandler(
       state,
       projectPath,
       searchService,
       logger.for("system-transform"),
-      tracker,
     ),
 
     event: async ({ event }) => {
       try {
         if (event.type === "session.created") {
-          // Both consumers handle their own parentID / title-prefix guards.
-          // Run them in parallel; failures in one must not affect the other.
-
-          // Narrow the event shape for our handlers (they only read .properties.info.{id,parentID,title,directory}).
-          // The SDK's full Session type has more fields; we defensively pick what we need.
-          const info = (event.properties as { info?: unknown }).info;
-          if (!info || typeof info !== "object") {
-            logger.debug("event session.created: missing info, skipping");
-            return;
-          }
-          const i = info as {
-            id?: unknown;
-            parentID?: unknown;
-            title?: unknown;
-            directory?: unknown;
-          };
-          if (typeof i.id !== "string") {
-            logger.debug("event session.created: info.id not string, skipping");
-            return;
-          }
-
-          const narrowed = {
-            type: "session.created" as const,
-            properties: {
-              info: {
-                id: i.id,
-                parentID: typeof i.parentID === "string" ? i.parentID : undefined,
-                title: typeof i.title === "string" ? i.title : "",
-                directory:
-                  typeof i.directory === "string" ? i.directory : projectPath,
-              },
-            },
-          };
-
-          await Promise.allSettled([
-            handleResume({ state, event: narrowed, projectPath, logger: logger.for("resume") }),
-            handleSessionCreatedForDream({
-              event: narrowed,
-              config: { client: input.client, projectPath, model: state.bestModel(), logger: logger.for("auto-dream") },
-            }),
-            handleSessionCreatedForDistill({
-              event: narrowed,
-              config: { client: input.client, projectPath, model: state.bestModel(), logger: logger.for("auto-distill") },
-            }),
-          ]);
           return;
         }
 
         if (event.type === "session.idle") {
           const idleSessionID = (event.properties as { sessionID?: string }).sessionID;
-          if (idleSessionID && state.hasPendingEnrichment(idleSessionID)) {
-            state.consumePendingEnrichment(idleSessionID);
-            try {
-              const result = await runEnrichment({
-                client: input.client,
-                projectPath,
-                sessionID: idleSessionID,
-                logger: logger.for("enrichment"),
-              });
-              logger.info("idle enrichment result", { ...result });
-            } catch (err) {
-              logger.warn("idle enrichment failed", {
-                error: err instanceof Error ? err.message : String(err),
-              });
-            }
-          } else {
-            logger.debug("event session.idle (no pending enrichment)");
-          }
 
           if (idleSessionID) {
             const pending = state.consumePendingNotify();

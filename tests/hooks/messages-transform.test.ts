@@ -377,30 +377,7 @@ describe("createMessagesTransformHandler", () => {
     expect(targetParts.length).toBe(0);
   });
 
-  // A3: Orphaned tool_use parts get converted to synthetic tool results
-  it("A3: repairs orphaned tool_use parts with no matching tool_result", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
-    const { messages: msgs } = buildStripTestMessages(
-      [{ type: "text", text: "real content" }],
-      "target-1",
-    );
-    // Add an assistant message with tool_use at index 4 (in stripping range)
-    msgs.splice(4, 0, mockMessage("assistant", [
-      { type: "tool_use", id: "orphan-1", name: "read" },
-      { type: "text", text: "I used a tool" },
-    ], "tool-msg"));
-    // No matching tool_result anywhere
-    const output = makeOutput(msgs);
-    await handler({} as never, output as never);
-    // The orphaned tool_use should be converted to a tool part
-    const toolMsg = output.messages[4];
-    const toolPart = toolMsg.parts[0] as Record<string, unknown>;
-    expect(toolPart["type"]).toBe("tool");
-    expect(toolPart["text"]).toBe("[context-stripped]");
-  });
-
-  // A3: tool_use with matching tool_result is NOT modified
-  it("A3: does not modify tool_use that has a matching tool_result", async () => {
+  it("does not modify tool_use that has a matching tool_result", async () => {
     const handler = createMessagesTransformHandler(state, logger as never);
     const { messages: msgs } = buildStripTestMessages(
       [{ type: "text", text: "real content" }],

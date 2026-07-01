@@ -1,14 +1,15 @@
 ---
 agent: build
-description: Capture current session state to checkpoint before risky operation
+description: Consolidate persistent memory — dedup + purge stale entries + enforce size cap
 ---
 
-Run the memory checkpoint capture now:
+Run the memory consolidation now:
 
-1. Call memory_search to recall any prior decisions about the current task (avoids re-deciding).
-2. Summarize the current session state: what we've decided, what we're working on, any constraints discovered.
-3. Use memory_store (type="decision", scope="project") for each confirmed decision.
-4. Use memory_store (type="constraint", scope="project") for each hard constraint.
-5. Use memory_store (type="gotcha", scope="project") for any error→fix pair discovered.
+1. Read the current MEMORY.md at `.deep-memory/MEMORY.md`.
+2. The plugin's `consolidateMemory` function will:
+   - Remove exact and near-duplicate entries (SimHash similarity ≥ 0.92)
+   - Purge stale entries whose `file:symbol:hash` binding no longer matches (use `read` to verify any entries referencing specific files)
+3. After consolidation, confirm: how many entries were kept, how many removed.
+4. If MEMORY.md exceeds 200 lines after consolidation, move overflow to `.deep-memory/MEMORY-archive.md`.
 
-After capture, confirm what was saved. Be selective — only store findings that will matter in future sessions.
+Then summarize the current memory state for the user: total entries by type (decisions, constraints, gotchas, facts, notes).

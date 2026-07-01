@@ -2,9 +2,6 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { RepoMapTracker } from "../../src/repomap/tracker.js";
-import { composeSystemPayload } from "../../src/inject/system-payload.js";
-import { createPluginState } from "../../src/hooks/shared-state.js";
 import { renderCheckpoint } from "../../src/extract/checkpoint-writer.js";
 import type { HeuristicResult } from "../../src/extract/heuristics.js";
 
@@ -14,61 +11,15 @@ function createTmpDir(): string {
 
 describe("repomap integration", () => {
   let tmpDir: string;
-  let projectPath: string;
 
   beforeEach(() => {
     tmpDir = createTmpDir();
-    projectPath = tmpDir;
     process.env["DEEP_MEMORY_DATA"] = path.join(tmpDir, "data");
   });
 
   afterEach(() => {
     delete process.env["DEEP_MEMORY_DATA"];
     fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it("tracker symbols appear in system-payload volatile injection", async () => {
-    const state = createPluginState();
-    state.recordAgent("sess-1", "build");
-
-    const tracker = new RepoMapTracker();
-    tracker.recordRead("src/auth.ts", [
-      "export function login() { }",
-      "export function logout() { }",
-    ].join("\n"));
-    tracker.recordRead("src/db.ts", [
-      "export function connect() { }",
-    ].join("\n"));
-
-    const { volatile } = await composeSystemPayload({
-      state,
-      sessionID: "sess-1",
-      projectPath,
-      mode: "normal",
-      tracker,
-    });
-
-    expect(volatile).toContain("<deep-memory-repomap>");
-    expect(volatile).toContain("src/auth.ts:");
-    expect(volatile).toContain("login");
-    expect(volatile).toContain("logout");
-    expect(volatile).toContain("src/db.ts:");
-    expect(volatile).toContain("connect");
-    expect(volatile).toContain("</deep-memory-repomap>");
-  });
-
-  it("system-payload without tracker omits repomap", async () => {
-    const state = createPluginState();
-    state.recordAgent("sess-1", "build");
-
-    const { volatile } = await composeSystemPayload({
-      state,
-      sessionID: "sess-1",
-      projectPath,
-      mode: "normal",
-    });
-
-    expect(volatile).not.toContain("<deep-memory-repomap>");
   });
 
   it("renderCheckpoint includes folded file context", () => {

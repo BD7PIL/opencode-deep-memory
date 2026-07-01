@@ -5,10 +5,12 @@ import { createMemorySearchTool } from "./memory-search.js";
 import { createMemoryStoreTool } from "./memory-store.js";
 import { createMemoryForgetTool } from "./memory-forget.js";
 import { createMemoryExpandTool } from "./memory-expand.js";
+import { createContextCompressTool } from "./context-compress.js";
 import { ccrRetrieve } from "../compress/ccr.js";
 
 export function createMemoryTools(
   service: SearchService,
+  state: PluginState,
   opts?: { projectPath?: string },
 ) {
   const search = createMemorySearchTool(service);
@@ -17,12 +19,14 @@ export function createMemoryTools(
   const expand = opts?.projectPath
     ? createMemoryExpandTool({ projectPath: opts.projectPath })
     : createMemoryExpandTool({ projectPath: "" });
+  const compress = createContextCompressTool(state);
 
   return {
     memory_search: search,
     memory_store: store,
     memory_forget: forget,
     memory_expand: expand,
+    context_compress: compress,
   };
 }
 

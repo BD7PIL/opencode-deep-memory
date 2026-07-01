@@ -56,6 +56,10 @@ export class SearchService {
     });
   }
 
+  get project(): string {
+    return this.projectPath;
+  }
+
   /**
    * Ensure the index is initialized. Lazy — calls Reconciler.sync() on first call.
    */

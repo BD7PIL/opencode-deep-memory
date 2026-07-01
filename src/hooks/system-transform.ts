@@ -1,27 +1,22 @@
 /**
  * experimental.chat.system.transform hook handler.
  *
- * Injects memory context into the system prompt based on agent tier
- * and resume state. This is the core of the adaptive injection pillar.
+ * V4: Injects frozen TOOL_HINT + mtime-cached MEMORY.md only.
+ * No volatile block, no BM25 search, no repomap. See DESIGN_V4.md.
  */
 
 import type { Hooks } from "@opencode-ai/plugin";
 import type { PluginState } from "./shared-state.js";
 import type { Logger } from "../shared/log.js";
 import type { SearchService } from "../search/service.js";
-import type { RepoMapTracker } from "../repomap/tracker.js";
 import { composeSystemPayload } from "../inject/system-payload.js";
-import { classifyAgent } from "../inject/agent-budget.js";
+import { shouldWhisper, formatWhisper } from "../inject/auto-search.js";
 
-/**
- * Create a system.transform handler for adaptive memory injection.
- */
 export function createSystemTransformHandler(
   state: PluginState,
   projectPath: string,
   searchService?: SearchService,
   logger?: Logger,
-  tracker?: RepoMapTracker,
 ): NonNullable<Hooks["experimental.chat.system.transform"]> {
   return async (input, output) => {
     if (!input.sessionID) {
@@ -30,58 +25,50 @@ export function createSystemTransformHandler(
     }
 
     const sessionID = input.sessionID;
-
-    let mode: "normal" | "post-compaction" | "post-resume" = "normal";
-
-    if (state.hasPendingResume(sessionID)) {
-      const agent = state.agentOf(sessionID);
-      const tier = classifyAgent(agent);
-      if (tier === "main") {
-        mode = "post-resume";
-        state.consumePendingResume(sessionID);
-      }
-    }
-
     const userQuery = state.consumeLastUserText(sessionID);
 
-    const { stable, volatile, stats: payloadStats } = await composeSystemPayload({
+    const { payload, cacheHit, memorySize } = await composeSystemPayload({
       state,
       sessionID,
       projectPath,
-      mode,
-      searchService,
-      userQuery,
       logger,
-      tracker,
     });
 
-    if (stable) {
-      output.system.push(stable);
-    }
-    if (volatile) {
-      output.system.push(volatile);
+    let finalPayload = payload;
+
+    if (!state.hasGreetedSession(sessionID)) {
+      state.markGreetedSession(sessionID);
+      if (searchService && userQuery) {
+        try {
+          await searchService.ensureIndex();
+          const results = await searchService.search(userQuery, { scope: "all", limit: 10 });
+          if (shouldWhisper(results)) {
+            finalPayload += `\n${formatWhisper(results, userQuery)}`;
+          }
+        } catch {
+          // search failure is non-fatal
+        }
+      }
     }
 
-    const agent = state.agentOf(sessionID);
-    const tier = classifyAgent(agent);
-    logger?.debug("system.transform: injected", {
+    output.system.push(finalPayload);
+
+    logger?.debug("system.transform V4: injected", {
       sessionID,
-      agent: agent ?? "(undefined)",
-      tier,
-      mode,
-      stableSize: stable.length,
-      volatileSize: volatile.length,
+      cacheHit,
+      memorySize,
+      payloadSize: finalPayload.length,
     });
 
     state.mergeNotify({
       injection: {
-        stableSize: stable.length,
-        volatileSize: volatile.length,
-        tier,
-        mode,
-        searchEntries: payloadStats.searchEntries,
-        repoMapEntries: payloadStats.repoMapEntries,
-        hasCheckpoint: payloadStats.hasCheckpoint,
+        stableSize: finalPayload.length,
+        volatileSize: 0,
+        tier: "v4",
+        mode: "normal",
+        searchEntries: 0,
+        repoMapEntries: 0,
+        hasCheckpoint: false,
       },
     });
   };

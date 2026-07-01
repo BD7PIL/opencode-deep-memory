@@ -1,9 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createSystemTransformHandler } from "../../src/hooks/system-transform.js";
-import {
-  createPluginState,
-  type PluginState,
-} from "../../src/hooks/shared-state.js";
+import { createPluginState, type PluginState } from "../../src/hooks/shared-state.js";
 import { scopeDir } from "../../src/shared/paths.js";
 import fs from "node:fs";
 import os from "node:os";
@@ -13,7 +10,7 @@ function mockModel(): unknown {
   return { id: "test-model", providerID: "test" };
 }
 
-function setupDataRoot(opts: { memoryContent?: string; checkpointContent?: string }): {
+function setupDataRoot(opts: { memoryContent?: string }): {
   projectPath: string;
   dataRoot: string;
   cleanup: () => void;
@@ -26,9 +23,6 @@ function setupDataRoot(opts: { memoryContent?: string; checkpointContent?: strin
   fs.mkdirSync(projectDir, { recursive: true });
   if (opts.memoryContent !== undefined) {
     fs.writeFileSync(path.join(projectDir, "MEMORY.md"), opts.memoryContent, "utf8");
-  }
-  if (opts.checkpointContent !== undefined) {
-    fs.writeFileSync(path.join(projectDir, "checkpoint.md"), opts.checkpointContent, "utf8");
   }
 
   return {
@@ -44,11 +38,15 @@ function setupDataRoot(opts: { memoryContent?: string; checkpointContent?: strin
   };
 }
 
-describe("createSystemTransformHandler", () => {
+describe("createSystemTransformHandler V4", () => {
   let state: PluginState;
 
   beforeEach(() => {
     state = createPluginState();
+  });
+
+  afterEach(() => {
+    delete process.env["DEEP_MEMORY_DATA"];
   });
 
   it("skips when sessionID is undefined", async () => {
@@ -63,127 +61,84 @@ describe("createSystemTransformHandler", () => {
     }
   });
 
-  it("pushes m[0]+m[1] for main tier with pendingResume", async () => {
+  it("pushes single payload containing TOOL_HINT for any agent", async () => {
     const { projectPath, cleanup } = setupDataRoot({
       memoryContent: "## Rules\n- rule 1\n",
     });
     try {
-      const sessionID = "sess-resume-1";
-      state.recordAgent(sessionID, "sisyphus");
-      state.setPendingResume(sessionID, { budgetTokens: 3000, projectHash: "abc" });
-
       const handler = createSystemTransformHandler(state, projectPath);
       const output = { system: [] as string[] };
-      await handler({ sessionID, model: mockModel() as never }, output);
+      await handler({ sessionID: "sess-1", model: mockModel() as never }, output);
 
-      expect(output.system.length).toBe(2);
+      expect(output.system.length).toBe(1);
       expect(output.system[0]).toContain("<deep-memory-stable>");
-      expect(output.system[1]).toContain("<deep-memory-volatile>");
-      expect(state.hasPendingResume(sessionID)).toBe(false);
-    } finally {
-      cleanup();
-    }
-  });
-
-  it("second call after consume uses normal mode", async () => {
-    const { projectPath, cleanup } = setupDataRoot({
-      memoryContent: "## Decisions\n- decision 1\n".repeat(20),
-    });
-    try {
-      const sessionID = "sess-resume-2";
-      state.recordAgent(sessionID, "build");
-      state.setPendingResume(sessionID, { budgetTokens: 3000, projectHash: "abc" });
-
-      const handler = createSystemTransformHandler(state, projectPath);
-
-      const output1 = { system: [] as string[] };
-      await handler({ sessionID, model: mockModel() as never }, output1);
-
-      const output2 = { system: [] as string[] };
-      await handler({ sessionID, model: mockModel() as never }, output2);
-
-      expect(output1.system.length).toBe(2);
-      expect(output2.system.length).toBe(2);
-    } finally {
-      cleanup();
-    }
-  });
-
-  it("does NOT consume pendingResume when agent is non-main tier", async () => {
-    const { projectPath, cleanup } = setupDataRoot({
-      memoryContent: "## Rules\n- rule 1\n",
-    });
-    try {
-      const sessionID = "sess-resume-3";
-      state.recordAgent(sessionID, "explore");
-      state.setPendingResume(sessionID, { budgetTokens: 3000, projectHash: "abc" });
-
-      const handler = createSystemTransformHandler(state, projectPath);
-      const output = { system: [] as string[] };
-      await handler({ sessionID, model: mockModel() as never }, output);
-
-      expect(output.system[0]).toContain("tool-hint");
-      expect(state.hasPendingResume(sessionID)).toBe(true);
-    } finally {
-      cleanup();
-    }
-  });
-
-  it("pushes m[0]+m[1] in normal mode for main tier", async () => {
-    const { projectPath, cleanup } = setupDataRoot({
-      memoryContent: "## Rules\n- rule 1\n",
-    });
-    try {
-      const sessionID = "sess-normal-1";
-      state.recordAgent(sessionID, "build");
-
-      const handler = createSystemTransformHandler(state, projectPath);
-      const output = { system: [] as string[] };
-      await handler({ sessionID, model: mockModel() as never }, output);
-
-      expect(output.system.length).toBe(2);
-      expect(output.system[0]).toContain("<deep-memory-stable>");
-      expect(output.system[0]).toContain("tool-hint");
+      expect(output.system[0]).toContain("memory_search");
       expect(output.system[0]).toContain("<constraints>");
-      expect(output.system[1]).toContain("<deep-memory-volatile>");
+      expect(output.system[0]).toContain("rule 1");
     } finally {
       cleanup();
     }
   });
 
-  it("produces stable-only for explore agent (subagent tier)", async () => {
+  it("includes MEMORY.md content when file exists", async () => {
     const { projectPath, cleanup } = setupDataRoot({
-      memoryContent: "## Rules\n- some rule\n",
+      memoryContent: "## Decisions\nUse vitest.\n",
     });
     try {
-      const sessionID = "sess-subagent-1";
-      state.recordAgent(sessionID, "librarian");
-
       const handler = createSystemTransformHandler(state, projectPath);
       const output = { system: [] as string[] };
-      await handler({ sessionID, model: mockModel() as never }, output);
+      await handler({ sessionID: "sess-2", model: mockModel() as never }, output);
 
-      expect(output.system[0]).toContain("<deep-memory-stable>");
-      expect(output.system[0]).toContain("tool-hint");
+      expect(output.system[0]).toContain("Use vitest");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("works without MEMORY.md (tool-hint only)", async () => {
+    const { projectPath, cleanup } = setupDataRoot({});
+    try {
+      const handler = createSystemTransformHandler(state, projectPath);
+      const output = { system: [] as string[] };
+      await handler({ sessionID: "sess-3", model: mockModel() as never }, output);
+
+      expect(output.system.length).toBe(1);
+      expect(output.system[0]).toContain("memory_search");
       expect(output.system[0]).not.toContain("<constraints>");
     } finally {
       cleanup();
     }
   });
 
-  it("handles unknown agent gracefully (defaults to main tier)", async () => {
+  it("produces byte-identical payload across calls when MEMORY.md unchanged", async () => {
     const { projectPath, cleanup } = setupDataRoot({
-      memoryContent: "## Rules\n- rule\n",
+      memoryContent: "## Rules\nStable rule.\n",
     });
     try {
-      const sessionID = "sess-unknown-1";
+      const handler = createSystemTransformHandler(state, projectPath);
+      const out1 = { system: [] as string[] };
+      const out2 = { system: [] as string[] };
+      await handler({ sessionID: "s1", model: mockModel() as never }, out1);
+      await handler({ sessionID: "s2", model: mockModel() as never }, out2);
 
+      expect(out2.system[0]).toBe(out1.system[0]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("does NOT push any volatile block", async () => {
+    const { projectPath, cleanup } = setupDataRoot({
+      memoryContent: "## Rules\nrule\n",
+    });
+    try {
       const handler = createSystemTransformHandler(state, projectPath);
       const output = { system: [] as string[] };
-      await handler({ sessionID, model: mockModel() as never }, output);
+      await handler({ sessionID: "sess-v", model: mockModel() as never }, output);
 
-      expect(output.system.length).toBe(2);
-      expect(output.system[0]).toContain("<constraints>");
+      expect(output.system.length).toBe(1);
+      expect(output.system[0]).not.toContain("<deep-memory-volatile>");
+      expect(output.system[0]).not.toContain("<relevant>");
     } finally {
       cleanup();
     }

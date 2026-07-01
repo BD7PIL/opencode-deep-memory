@@ -1,7 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { BM25Index } from "../../src/search/bm25.js";
-import { allocateAndRender } from "../../src/inject/budget-allocator.js";
-import { dedupByJaccard } from "../../src/inject/dedup.js";
 import { tokenize } from "../../src/search/tokenizer.js";
 
 describe("BENCHMARK: BM25 Scale", () => {
@@ -31,44 +29,6 @@ describe("BENCHMARK: BM25 Scale", () => {
       expect(idx.size).toBe(n);
       expect(rebuildMs).toBeLessThan(5000);
       expect(parseFloat(p99)).toBeLessThan(250);
-    });
-  }
-});
-
-describe("BENCHMARK: Tier Allocator Scale", () => {
-  for (const n of [10, 50, 100, 200]) {
-    it(`${n} entries × 3 budgets`, () => {
-      const results = Array.from({ length: n }, (_, i) => ({
-        score: Math.max(0.1, 15 - i * (15 / n)),
-        heading: i < n * 0.2 ? "constraint" : i < n * 0.5 ? "decision" : "note",
-        snippet: `Entry ${i}: `.padEnd(40 + (i % 4) * 20, "x") + ` topic ${i % 10}`,
-        scope: "project",
-      }));
-
-      for (const budget of [200, 500, 1000]) {
-        const t0 = process.hrtime.bigint();
-        const alloc = allocateAndRender(results, { budget });
-        const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-        const tiers = [...new Set(alloc.map((a) => a.tier))];
-        const tokens = alloc.reduce((s, a) => s + a.tokens, 0);
-
-        console.log(`  ${n} entries, ${budget}t: ${ms.toFixed(2)}ms, ${alloc.length}/${n} shown, tiers=[${tiers}], tokens=${tokens}/${budget}`);
-        expect(tokens).toBeLessThanOrEqual(budget + 50);
-        expect(alloc.length).toBeGreaterThan(0);
-      }
-    });
-  }
-});
-
-describe("BENCHMARK: Dedup Scale", () => {
-  for (const n of [10, 50, 100, 500]) {
-    it(`${n} items`, () => {
-      const items = Array.from({ length: n }, (_, i) => `entry ${i} with content about topic ${i % 20}`);
-      const t0 = process.hrtime.bigint();
-      const deduped = dedupByJaccard(items, (s) => s);
-      const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-      console.log(`  ${n} items: ${ms.toFixed(2)}ms, kept=${deduped.length}, removed=${n - deduped.length}`);
-      expect(deduped.length).toBeLessThanOrEqual(n);
     });
   }
 });

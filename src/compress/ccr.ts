@@ -30,7 +30,7 @@ export function ccrRetrieve(state: PluginState, hash: string): string | undefine
 }
 
 export function ccrInjectMarker(compressed: string, hash: string): string {
-  return `${compressed}\n[ccr:${hash}]`;
+  return `${compressed}\n[compressed — call deep_expand("${hash}") to restore original]`;
 }
 
 function sha256(data: string): string {

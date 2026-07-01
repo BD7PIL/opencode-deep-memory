@@ -17,8 +17,12 @@ import type { RepoMapTracker } from "../repomap/tracker.js";
 import { captureMessages } from "../extract/capture.js";
 import { extractHeuristics } from "../extract/heuristics.js";
 import { renderCheckpoint, writeCheckpoint } from "../extract/checkpoint-writer.js";
+import { consolidateMemory } from "../extract/consolidate.js";
 import { estimateTokensSum } from "../shared/tokens.js";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { acquireLock } from "../shared/lock.js";
+import { memoryFilePath } from "../shared/paths.js";
 import { HANDOFF_PREFIX, STRUCTURED_COMPACTION_PROMPT } from "../extract/summarize.js";
 
 /** Minimal client shape needed — avoids importing full PluginInput type. */
@@ -48,7 +52,7 @@ export interface CompactingHandlerArgs {
 export function createCompactingHandler(
   args: CompactingHandlerArgs,
 ): NonNullable<Hooks["experimental.session.compacting"]> {
-  const { client, state, projectPath, logger, tracker } = args;
+  const { client, projectPath, logger, tracker } = args;
 
   return async (input, output) => {
     const { sessionID } = input;
@@ -102,8 +106,31 @@ export function createCompactingHandler(
         logger,
       });
 
-      // Step 4: Signal that enrichment should run on next idle
-      state.setPendingEnrichment(sessionID);
+      // Step 4: Auto-consolidate MEMORY.md — SimHash dedup only (no stale purge during compaction)
+      try {
+        const memPath = memoryFilePath("project", "memory", projectPath);
+        if (existsSync(memPath)) {
+          const release = await acquireLock(memPath);
+          try {
+            const content = await readFile(memPath, "utf8");
+            const consolidated = consolidateMemory(content);
+            if (consolidated !== content) {
+              await writeFile(memPath, consolidated, "utf8");
+              logger?.info("compacting: consolidated MEMORY.md", {
+                beforeBytes: content.length,
+                afterBytes: consolidated.length,
+                diff: content.length - consolidated.length,
+              });
+            }
+          } finally {
+            release();
+          }
+        }
+      } catch (err) {
+        logger?.warn("compacting: consolidate failed (non-fatal)", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
 
       // Step 5: Inject structured compaction prompt + handoff prefix
       // Only on sessions with enough messages to justify structured summary

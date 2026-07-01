@@ -7,6 +7,8 @@ scripts/
 vitest.config.ts
 tsconfig.json
 tsup.config.ts
+DESIGN_V4.md
+OPTIMIZATION_V4.1.md
 DESIGN.md
 IMPLEMENTATION-v0.2.md
 OPTIMIZATION-PLAN-v0.3.md

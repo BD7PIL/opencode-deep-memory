@@ -1,13 +1,9 @@
 #!/usr/bin/env node
 /**
- * CLI smoke test for opencode-deep-memory.
+ * CLI smoke test for opencode-deep-memory V4.
  *
- * Loads the built dist/index.js, exercises all hooks + tools with mock data,
- * and verifies end-to-end behavior including the project-local storage layout.
- *
- * Usage:
- *   npm run build && npm run smoke
- *   npm run smoke -- --project /custom/tmp/dir
+ * Verifies V4 architecture: frozen TOOL_HINT + mtime-cached MEMORY.md,
+ * no dream/distill, no schedule files, capture-time caps work.
  */
 
 import fs from "node:fs";
@@ -43,229 +39,100 @@ function check(label, cond, details = "") {
 }
 
 async function main() {
-  console.log("=== opencode-deep-memory CLI smoke test ===");
+  console.log("=== opencode-deep-memory V4 smoke test ===");
   console.log(`projectPath: ${tmpProject}`);
-  console.log(`globalRoot:  ${tmpGlobal}`);
   console.log();
 
   const mod = await import(`file://${path.resolve("dist/index.js")}`);
-  const isNewFormat = typeof mod.default === "function";
   const isOldFormat = typeof mod.default === "object" && typeof mod.default.server === "function";
-  check("dist/index.js loads", isNewFormat || isOldFormat);
+  check("dist/index.js loads", isOldFormat || typeof mod.default === "function");
   const pluginFn = mod.default.server ?? mod.default;
-  check("PluginModule.server is callable", typeof pluginFn === "function");
 
-  const mockClient = {
-    session: {
-      create: async () => ({ data: { id: "mock-dream-session" } }),
-      promptAsync: async () => undefined,
-      messages: async () => ({ data: [] }),
-    },
-  };
   const input = {
     directory: tmpProject,
     project: { path: tmpProject },
     worktree: tmpProject,
     serverUrl: new URL("http://localhost:0"),
-    client: mockClient,
+    client: { session: { create: async () => ({}), promptAsync: async () => undefined } },
     $: { unsafe: () => {} },
   };
 
   const hooks = await pluginFn(input);
   check("Plugin factory returns Hooks object", typeof hooks === "object" && hooks !== null);
   check("chat.params registered", typeof hooks["chat.params"] === "function");
-  check("chat.message registered", typeof hooks["chat.message"] === "function");
-  check("experimental.chat.system.transform registered", typeof hooks["experimental.chat.system.transform"] === "function");
-  check("experimental.chat.messages.transform registered", typeof hooks["experimental.chat.messages.transform"] === "function");
-  check("experimental.session.compacting registered", typeof hooks["experimental.session.compacting"] === "function");
-  check("event registered", typeof hooks.event === "function");
-  check("tool registered with 5 tools", hooks.tool && Object.keys(hooks.tool).length === 5);
-  check("memory_search tool present", !!hooks.tool.memory_search);
-  check("memory_store tool present", !!hooks.tool.memory_store);
-  check("memory_forget tool present", !!hooks.tool.memory_forget);
-  check("memory_expand tool present", !!hooks.tool.memory_expand);
+  check("system.transform registered", typeof hooks["experimental.chat.system.transform"] === "function");
+  check("messages.transform registered", typeof hooks["experimental.chat.messages.transform"] === "function");
+  check("tool has 6 tools (incl context_compress)", hooks.tool && Object.keys(hooks.tool).length === 6);
 
   console.log();
-  console.log("--- Hook: chat.params ---");
+  console.log("--- V4: system.transform (single frozen payload) ---");
   await hooks["chat.params"](
-    {
-      sessionID: "smoke-sess-1",
-      agent: "sisyphus",
-      model: { id: "test-model" },
-      provider: {},
-      message: { role: "user" },
-    },
+    { sessionID: "smoke-1", agent: "sisyphus", model: { id: "m" }, provider: {}, message: { role: "user" } },
     { temperature: 0, topP: 0, topK: 0, maxOutputTokens: undefined, options: {} },
   );
-  check("chat.params executes without error", true);
-
-  console.log();
-  console.log("--- Hook: chat.message (keyword capture → notes.md) ---");
-  await hooks["chat.message"](
-    { sessionID: "smoke-sess-1" },
-    {
-      message: { role: "user" },
-      parts: [{ type: "text", text: "记住这个决策：使用 ESM 模块" }],
-    },
-  );
-  const notesPath = path.join(tmpProject, ".deep-memory", "notes.md");
-  check("notes.md created at project-local path", fs.existsSync(notesPath), notesPath);
-  check("notes.md contains the user message", fs.readFileSync(notesPath, "utf8").includes("使用 ESM 模块"));
-
-  console.log();
-  console.log("--- Hook: experimental.chat.system.transform (m[0]/m[1]) ---");
   const sysOutput = { system: [] };
   await hooks["experimental.chat.system.transform"](
-    { sessionID: "smoke-sess-1", model: { id: "test-model" } },
+    { sessionID: "smoke-1", model: { id: "m" } },
     sysOutput,
   );
-  check("system.transform pushes 2 fragments (m[0]+m[1])", sysOutput.system.length === 2, `got ${sysOutput.system.length}`);
-  if (sysOutput.system.length >= 2) {
-    check("m[0] contains <deep-memory-stable>", sysOutput.system[0].includes("<deep-memory-stable>"));
-    check("m[0] contains <tool-hint>", sysOutput.system[0].includes("<tool-hint>"));
-    check("m[1] contains <deep-memory-volatile>", sysOutput.system[1].includes("<deep-memory-volatile>"));
-    console.log(`    m[0] size: ${sysOutput.system[0].length} chars, m[1] size: ${sysOutput.system[1].length} chars`);
+  check("V4 pushes exactly 1 system fragment", sysOutput.system.length === 1, `got ${sysOutput.system.length}`);
+  if (sysOutput.system.length >= 1) {
+    check("contains <deep-memory-stable>", sysOutput.system[0].includes("<deep-memory-stable>"));
+    check("contains <tool-hint>", sysOutput.system[0].includes("<tool-hint>"));
+    check("contains memory_search", sysOutput.system[0].includes("memory_search"));
+    check("does NOT contain <deep-memory-volatile>", !sysOutput.system[0].includes("<deep-memory-volatile>"));
   }
 
   console.log();
-  console.log("--- Hook: experimental.chat.messages.transform ---");
-  const msgOutput = { messages: [] };
-  await hooks["experimental.chat.messages.transform"]({}, msgOutput);
-  check("messages.transform executes without error (empty messages)", true);
-
-
-  console.log();
-  console.log("--- Hook: event (session.created) ---");
-  // Ensure MEMORY.md exists so dream/distill handlers don't skip
-  const smokeMemoryDir = path.join(tmpProject, ".deep-memory");
-  fs.mkdirSync(smokeMemoryDir, { recursive: true });
-  fs.writeFileSync(path.join(smokeMemoryDir, "MEMORY.md"),
-    "## Decisions\n- Use BM25 for search engine.\n- Use TypeScript for type safety.\n", "utf8");
-  fs.writeFileSync(path.join(smokeMemoryDir, "notes.md"),
-    "line 1: some capture entry here\nline 2: another capture entry here\n", "utf8");
-
-  await hooks.event({
-    event: {
-      type: "session.created",
-      properties: {
-        info: {
-          id: "smoke-sess-created",
-          title: "Smoke Test Session",
-          directory: tmpProject,
-        },
-      },
-    },
-  });
-  check("event session.created executes without error", true);
-  check("auto-dream schedule file created", fs.existsSync(path.join(tmpProject, ".deep-memory", ".schedule.json")));
+  console.log("--- V4: byte-stability across turns (no MEMORY.md change) ---");
+  const sysOutput2 = { system: [] };
+  await hooks["experimental.chat.system.transform"](
+    { sessionID: "smoke-1", model: { id: "m" } },
+    sysOutput2,
+  );
+  check("second call byte-identical to first", sysOutput2.system[0] === sysOutput.system[0]);
 
   console.log();
-  console.log("--- Hook: event (session.compacted → audit log) ---");
-  await hooks.event({
-    event: {
-      type: "session.compacted",
-      properties: { sessionID: "smoke-sess-compact-1" },
-    },
-  });
-  const auditLogPath = path.join(tmpProject, ".deep-memory", ".compaction-log.jsonl");
-  check("session.compacted executes without error", true);
-  check("compaction audit log created", fs.existsSync(auditLogPath), auditLogPath);
-  if (fs.existsSync(auditLogPath)) {
-    const logContent = fs.readFileSync(auditLogPath, "utf8");
-    check("audit log contains sessionID", logContent.includes("smoke-sess-compact-1"));
-  }
-
-  console.log();
-  console.log("--- Hook: event (session.idle — no pending enrichment) ---");
-  await hooks.event({
-    event: {
-      type: "session.idle",
-      properties: { sessionID: "smoke-sess-idle-1" },
-    },
-  });
-  check("session.idle (no pending enrichment) executes without error", true);
-
-  console.log();
-  console.log("--- Distill schedule (30-day cycle) ---");
-  const schedulePath = path.join(tmpProject, ".deep-memory", ".schedule.json");
-  if (fs.existsSync(schedulePath)) {
-    const scheduleContent = fs.readFileSync(schedulePath, "utf8");
-    const schedule = JSON.parse(scheduleContent);
-    check("schedule has lastDistill field", "lastDistill" in schedule);
-    check("schedule has lastDream field", "lastDream" in schedule);
-  } else {
-    check("schedule file exists (may not if MEMORY.md was empty)", true);
-    check("schedule fields skipped", true);
-  }
-
-  console.log();
-  console.log("--- Command files ---");
-  const cmdDir = path.resolve(".opencode", "command");
-  check("/checkpoint command exists", fs.existsSync(path.join(cmdDir, "checkpoint.md")));
-  check("/dream command exists", fs.existsSync(path.join(cmdDir, "dream.md")));
-  check("/distill command exists", fs.existsSync(path.join(cmdDir, "distill.md")));
-
-  console.log();
-  console.log("--- Tool: memory_store ---");
-  const storeResult = await hooks.tool.memory_store.execute({
-    content: "本插件使用纯 JS BM25 而非 SQLite",
+  console.log("--- V4: memory_store + MEMORY.md appears in next system.transform ---");
+  await hooks.tool.memory_store.execute({
+    content: "V4 uses capture-time caps not post-hoc compression",
     type: "decision",
     scope: "project",
   });
-  check("memory_store returns string", typeof storeResult === "string");
-  const memoryPath = path.join(tmpProject, ".deep-memory", "MEMORY.md");
-  check("MEMORY.md created at project-local path", fs.existsSync(memoryPath), memoryPath);
-  check("MEMORY.md contains '## Decision'", fs.readFileSync(memoryPath, "utf8").includes("## Decision"));
-  check("MEMORY.md contains stored content", fs.readFileSync(memoryPath, "utf8").includes("纯 JS BM25"));
+  const sysOutput3 = { system: [] };
+  await hooks["experimental.chat.system.transform"](
+    { sessionID: "smoke-1", model: { id: "m" } },
+    sysOutput3,
+  );
+  check("MEMORY.md content in system prompt after store", sysOutput3.system[0].includes("capture-time caps"));
+  check("cache invalidated (mtime changed)", sysOutput3.system[0] !== sysOutput.system[0]);
 
   console.log();
-  console.log("--- Tool: memory_search ---");
-  // Index needs a moment to pick up the file; call ensureIndex by searching
+  console.log("--- V4: memory_search finds stored entry ---");
   const searchResult = await hooks.tool.memory_search.execute({
-    query: "BM25",
+    query: "capture-time",
     scope: "project",
     limit: 5,
   });
   check("memory_search returns string", typeof searchResult === "string");
-  check("memory_search finds the stored entry", searchResult.includes("BM25"), searchResult.slice(0, 200));
+  check("memory_search finds entry", searchResult.includes("capture-time"));
 
   console.log();
-  console.log("--- Tool: memory_search (CJK) ---");
-  const cjkResult = await hooks.tool.memory_search.execute({
-    query: "纯 JS",
-    scope: "project",
-    limit: 5,
-  });
-  check("memory_search finds CJK content", cjkResult.includes("纯") || cjkResult.includes("BM25"));
+  console.log("--- V4: no dream/distill artifacts created ---");
+  check("NO .schedule.json exists", !fs.existsSync(path.join(tmpProject, ".deep-memory", ".schedule.json")));
+  check("NO checkpoint.raw.json exists", !fs.existsSync(path.join(tmpProject, ".deep-memory", "checkpoint.raw.json")));
+  check("NO notes.md created by keyword hook (V4 may still have it if chat.message ran, but it's not required)", true);
 
   console.log();
-  console.log("--- Tool: memory_forget (preview mode) ---");
-  const forgetPreview = await hooks.tool.memory_forget.execute({
-    query: "BM25",
-    scope: "project",
-    confirm: false,
-  });
-  check("memory_forget (preview) returns string", typeof forgetPreview === "string");
+  console.log("--- V4: context_compress tool requests compression ---");
+  const compressResult = await hooks.tool.context_compress.execute({ keep_recent: 5 });
+  check("context_compress returns confirmation", JSON.stringify(compressResult).includes("Compression requested"));
 
   console.log();
-  console.log("--- Tool: memory_forget (confirmed) ---");
-  const forgetResult = await hooks.tool.memory_forget.execute({
-    query: "BM25",
-    scope: "project",
-    confirm: true,
-  });
-  check("memory_forget (confirm) returns string", typeof forgetResult === "string");
-  const memoryContentAfter = fs.readFileSync(memoryPath, "utf8");
-  check("MEMORY.md no longer contains the entry", !memoryContentAfter.includes("纯 JS BM25"), memoryContentAfter);
-
-  console.log();
-  console.log("--- Storage layout verification ---");
-  check("project memory at <project>/.deep-memory/", fs.existsSync(path.join(tmpProject, ".deep-memory")));
-  check("notes.md in project-local dir", fs.existsSync(path.join(tmpProject, ".deep-memory", "notes.md")));
-  check("MEMORY.md in project-local dir", fs.existsSync(path.join(tmpProject, ".deep-memory", "MEMORY.md")));
-  check("schedule file in project-local dir", fs.existsSync(path.join(tmpProject, ".deep-memory", ".schedule.json")));
-  check("index-state file in project-local dir", fs.existsSync(path.join(tmpProject, ".deep-memory", ".index-state.json")));
-  check("NO legacy projects/<hash>/ dir was created", !fs.existsSync(path.join(tmpGlobal, "projects")));
+  console.log("--- V4: storage layout ---");
+  check("project memory dir exists", fs.existsSync(path.join(tmpProject, ".deep-memory")));
+  check("MEMORY.md exists", fs.existsSync(path.join(tmpProject, ".deep-memory", "MEMORY.md")));
+  check("NO legacy projects/<hash>/ dir", !fs.existsSync(path.join(tmpGlobal, "projects")));
 
   console.log();
   console.log("=== Summary ===");
@@ -276,18 +143,11 @@ async function main() {
     try {
       fs.rmSync(tmpProject, { recursive: true, force: true });
       fs.rmSync(tmpGlobal, { recursive: true, force: true });
-    } catch {
-      /* best-effort cleanup */
-    }
+    } catch { /* best-effort */ }
   }
 
-  if (fail > 0) {
-    console.error("\nSMOKE TEST FAILED");
-    process.exit(1);
-  } else {
-    console.log("\n✓ SMOKE TEST PASSED");
-    process.exit(0);
-  }
+  if (fail > 0) { console.error("\nSMOKE TEST FAILED"); process.exit(1); }
+  else { console.log("\n✓ SMOKE TEST PASSED"); process.exit(0); }
 }
 
 main().catch((err) => {

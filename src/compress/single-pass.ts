@@ -1,9 +1,6 @@
 import type { PluginState } from "../hooks/shared-state.js";
-import { createToolSignature } from "./dedup.js";
-import { compressToolOutput } from "./tool-compress.js";
-import { crushJsonArray } from "./json-crush.js";
+import { capToolOutput } from "./capture-cap.js";
 import { ccrStore, ccrInjectMarker } from "./ccr.js";
-import { detectContentType } from "./detector.js";
 
 export interface SinglePassStats {
   toolDedup: number;
@@ -134,56 +131,41 @@ export function singlePassCompress(
 
       const output = typeof toolState?.["output"] === "string" ? toolState["output"] : undefined;
       if (!output) continue;
-      if (output === "[superseded by duplicate call]") continue;
-      if (output.includes("[ccr:")) continue;
+      if (output === "[OUTDATED — superseded by duplicate call]") continue;
+      if (output.includes("deep_expand(")) continue;
 
-      // === Dedup ===
+      // === Stale-read marking (Layer 2) ===
       if (!PROTECTED_TOOLS.has(toolName) && !NEVER_DEDUP.has(toolName)) {
         const input = toolState["input"] as Record<string, unknown> | undefined;
-        const signature = createToolSignature(toolName, input);
+        const signature = `${toolName}:${JSON.stringify(input ?? {})}`;
         const outputHash = simpleHash(output);
 
         const existing = seen.get(signature);
-        if (existing) {
-          if (existing.outputHash === outputHash) {
-            const prevMsg = messages[existing.msgIdx];
-            for (const prevPart of prevMsg.parts) {
-              if (typeof prevPart !== "object" || prevPart === null) continue;
-              const pp = prevPart as Record<string, unknown>;
-              const ppState = pp["state"] as Record<string, unknown> | undefined;
-              if (ppState?.["output"] === "[superseded by duplicate call]") continue;
-              if (typeof ppState?.["output"] === "string" && simpleHash(ppState["output"]) === outputHash) {
-                ppState["output"] = "[superseded by duplicate call]";
-                stats.toolDedup++;
-              }
+        if (existing && existing.outputHash === outputHash) {
+          const prevMsg = messages[existing.msgIdx];
+          for (const prevPart of prevMsg.parts) {
+            if (typeof prevPart !== "object" || prevPart === null) continue;
+            const pp = prevPart as Record<string, unknown>;
+            const ppState = pp["state"] as Record<string, unknown> | undefined;
+            if (typeof ppState?.["output"] === "string" &&
+                !ppState["output"].includes("[OUTDATED") &&
+                simpleHash(ppState["output"]) === outputHash) {
+              ppState["output"] = "[OUTDATED — superseded by newer identical call]";
+              stats.toolDedup++;
             }
           }
-          seen.set(signature, { msgIdx: i, outputHash });
-        } else {
-          seen.set(signature, { msgIdx: i, outputHash });
         }
+        seen.set(signature, { msgIdx: i, outputHash });
       }
 
-      // === Tool output compression ===
-      // PROTECTED_TOOLS (edit/write/etc.) are NEVER compressed — their output
-      // may contain LSP diagnostics or file content the agent needs for verification.
+      // === V4 capture-time cap (replaces post-hoc tool compression + JSON crush) ===
+      // Applied once per tool result. Original stored in CCR for deep_expand recovery.
       if (output.length >= 200 && !PROTECTED_TOOLS.has(toolName)) {
-        const result = compressToolOutput(toolName, output);
-        if (result.length < output.length * 0.85) {
-          const hash = ccrStore(state, output, result, toolName, callID);
-          toolState["output"] = ccrInjectMarker(result, hash);
+        const capResult = capToolOutput(output, toolName);
+        if (capResult.capped) {
+          const hash = ccrStore(state, output, capResult.output, toolName, callID);
+          toolState["output"] = ccrInjectMarker(capResult.output, hash);
           stats.toolOutputCompressed++;
-          continue;
-        }
-      }
-
-      // === JSON crush ===
-      if (output.length >= 200 && detectContentType(output) === "json" && !PROTECTED_TOOLS.has(toolName)) {
-        const crushed = crushJsonArray(output);
-        if (crushed.length < output.length * 0.85) {
-          const hash = ccrStore(state, output, crushed, toolName, callID);
-          toolState["output"] = ccrInjectMarker(crushed, hash);
-          stats.jsonCrushed++;
         }
       }
     }

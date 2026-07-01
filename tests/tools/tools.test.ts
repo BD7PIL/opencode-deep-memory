@@ -4,6 +4,7 @@ import { createMemorySearchTool } from "../../src/tools/memory-search.js";
 import { createMemoryStoreTool } from "../../src/tools/memory-store.js";
 import { createMemoryForgetTool } from "../../src/tools/memory-forget.js";
 import { createMemoryTools } from "../../src/tools/index.js";
+import { createPluginState } from "../../src/hooks/shared-state.js";
 
 function mockSearchService(): SearchService {
   return {
@@ -11,6 +12,7 @@ function mockSearchService(): SearchService {
     search: vi.fn().mockResolvedValue([]),
     addEntry: vi.fn().mockResolvedValue(undefined),
     removeEntry: vi.fn().mockResolvedValue({ removed: 0 }),
+    project: "/tmp/test-project",
   } as unknown as SearchService;
 }
 
@@ -180,37 +182,41 @@ describe("memory_forget tool", () => {
 });
 
 describe("createMemoryTools", () => {
-  it("returns all three tools", () => {
+  it("returns all five tools including context_compress", () => {
     const service = mockSearchService();
-    const tools = createMemoryTools(service);
+    const state = createPluginState();
+    const tools = createMemoryTools(service, state);
     expect(tools.memory_search).toBeDefined();
     expect(tools.memory_store).toBeDefined();
     expect(tools.memory_forget).toBeDefined();
+    expect(tools.memory_expand).toBeDefined();
+    expect(tools.context_compress).toBeDefined();
   });
 
-  it("backward compatible: works without opts parameter", () => {
+  it("context_compress tool requests compression in state", async () => {
     const service = mockSearchService();
-    const tools = createMemoryTools(service);
-    expect(Object.keys(tools)).toEqual([
-      "memory_search",
-      "memory_store",
-      "memory_forget",
-      "memory_expand",
-    ]);
+    const state = createPluginState();
+    const tools = createMemoryTools(service, state, { projectPath: "/test" });
+    const result = await tools.context_compress.execute({ keep_recent: 5 }, mockContext());
+    expect(JSON.stringify(result)).toContain("Compression requested");
+    const req = state.consumeCompressionRequest();
+    expect(req).toBeDefined();
+    expect(req!.keepRecent).toBe(5);
+  });
+
+  it("consumeCompressionRequest returns undefined after consumption", () => {
+    const state = createPluginState();
+    state.requestCompression(8);
+    state.consumeCompressionRequest();
+    expect(state.consumeCompressionRequest()).toBeUndefined();
   });
 
   it("includes memory_expand when projectPath is provided", () => {
     const service = mockSearchService();
-    const tools = createMemoryTools(service, {
+    const state = createPluginState();
+    const tools = createMemoryTools(service, state, {
       projectPath: "/test/project",
     });
-    expect(tools).toHaveProperty("memory_expand");
-    expect((tools as Record<string, { description: string }>).memory_expand.description).toContain("Expand compressed context");
-  });
-
-  it("memory_expand is always present (even without opts)", () => {
-    const service = mockSearchService();
-    const tools = createMemoryTools(service, {});
     expect(tools).toHaveProperty("memory_expand");
   });
 });

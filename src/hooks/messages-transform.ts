@@ -60,62 +60,6 @@ function isSystemInjected(msg: { parts: unknown[] }): boolean {
 }
 
 /**
- * A3: Defensive repair — ensure assistant messages with tool_use parts have
- * matching tool_result parts in subsequent messages. If a tool_result is
- * missing (e.g., due to aggressive future stripping), inject a synthetic one.
- *
- * Current implementation already skips messages containing tool parts, so this
- * is a safety net for forward-compatibility.
- */
-function repairOrphanedToolCalls(
-  messages: Array<{ info: { role: string }; parts: unknown[] }>,
-): void {
-  // Collect all tool_use IDs from assistant messages
-  const toolUseIds = new Set<string>();
-  for (const msg of messages) {
-    if (msg.info.role !== "assistant") continue;
-    for (const part of msg.parts) {
-      if (typeof part !== "object" || part === null) continue;
-      const p = part as Record<string, unknown>;
-      if (p["type"] === "tool_use" && typeof p["id"] === "string") {
-        toolUseIds.add(p["id"]);
-      }
-    }
-  }
-
-  if (toolUseIds.size === 0) return;
-
-  // Collect all tool_result IDs from user/tool-result messages
-  const toolResultIds = new Set<string>();
-  for (const msg of messages) {
-    for (const part of msg.parts) {
-      if (typeof part !== "object" || part === null) continue;
-      const p = part as Record<string, unknown>;
-      if (p["type"] === "tool_result" && typeof p["tool_use_id"] === "string") {
-        toolResultIds.add(p["tool_use_id"]);
-      }
-    }
-  }
-
-  // Find orphaned tool_use IDs (no matching tool_result)
-  for (const msg of messages) {
-    if (msg.info.role !== "assistant") continue;
-    for (const part of msg.parts) {
-      if (typeof part !== "object" || part === null) continue;
-      const p = part as Record<string, unknown>;
-      if (p["type"] === "tool_use" && typeof p["id"] === "string") {
-        if (!toolResultIds.has(p["id"])) {
-          // Convert orphaned tool_use to a synthetic tool result to prevent API errors
-          p["type"] = "tool";
-          p["state"] = { status: "ok" };
-          p["text"] = "[context-stripped]";
-        }
-      }
-    }
-  }
-}
-
-/**
  * Create a messages.transform handler for content compression.
  *
  * Operates only on assistant messages outside the protected tail (last 8).
@@ -219,13 +163,38 @@ export function createMessagesTransformHandler(
       messages.splice(toRemove[r], 1);
     }
 
-    // A3: Defensive repair — scan for orphaned tool_use parts.
-    // Current code already skips messages with tool parts, so this is a
-    // safety net in case future changes allow tool-part stripping.
-    repairOrphanedToolCalls(messages);
-
     if (Object.values(stats).some(v => v > 0)) {
       logger?.debug("messages.transform: stripped", stats);
+    }
+
+    const compressReq = state.consumeCompressionRequest();
+    if (compressReq) {
+      const cutoff = messages.length - compressReq.keepRecent;
+      let agentCompressed = 0;
+      for (let i = 2; i < cutoff; i++) {
+        const msg = messages[i];
+        if (!msg?.parts?.length) continue;
+        for (const part of msg.parts) {
+          if (typeof part !== "object" || part === null) continue;
+          const p = part as Record<string, unknown>;
+          if (p["type"] !== "tool") continue;
+          const toolState = p["state"] as Record<string, unknown> | undefined;
+          const output = typeof toolState?.["output"] === "string" ? toolState["output"] : "";
+          if (output.length < 500 || output.includes("deep_expand(")) continue;
+          const lines = output.split("\n");
+          if (lines.length < 20) continue;
+          const summary = lines.slice(0, 3).join("\n") +
+            `\n[... ${lines.length - 6} lines compressed — call deep_expand to restore ...]\n` +
+            lines.slice(-3).join("\n");
+          const { ccrStore, ccrInjectMarker } = await import("../compress/ccr.js");
+          const hash = ccrStore(state, output, summary, "context_compress");
+          toolState!["output"] = ccrInjectMarker(summary, hash);
+          agentCompressed++;
+        }
+      }
+      if (agentCompressed > 0) {
+        logger?.debug("messages.transform: agent-initiated compression", { agentCompressed });
+      }
     }
 
     const pipelineResult = runCompressionPipeline({
@@ -237,7 +206,7 @@ export function createMessagesTransformHandler(
 
     const ds = pipelineResult.stats;
     if (ds.toolDedup > 0 || ds.errorPurge > 0 || ds.toolOutputCompressed > 0 ||
-        ds.jsonCrushed > 0 || ds.assistantCompressed > 0 || ds.nudgeInjected) {
+        ds.assistantCompressed > 0) {
       logger?.debug("messages.transform: deep compression", { ...ds });
       state.mergeNotify({
         compression: stats,
@@ -246,28 +215,6 @@ export function createMessagesTransformHandler(
         protectedHead: PROTECTED_HEAD,
         protectedTail: KEEP_RECENT,
       });
-
-      // Proactive re-read: if compression modified content, remind the agent
-      // to re-read recently edited files (LSP diagnostics may have shifted).
-      const recentEdits = state.getRecentEdits();
-      if (recentEdits.length > 0) {
-        const fileList = recentEdits.slice(0, 5).join(", ");
-        const nudge = "\n\n<dm-nudge level=\"medium\">Context was compressed. Recent files may have shifted: " +
-          fileList +
-          ". Use `read` to re-verify if needed.</dm-nudge>";
-        for (let k = output.messages.length - 1; k >= 0; k--) {
-          const msg = output.messages[k] as { info: { role: string }; parts: unknown[] };
-          if (msg.info.role !== "assistant") continue;
-          for (const part of msg.parts) {
-            const p = part as Record<string, unknown>;
-            if (p["type"] === "text" && typeof p["text"] === "string") {
-              (p as { text: string }).text += nudge;
-              break;
-            }
-          }
-          break;
-        }
-      }
     } else if (Object.values(stats).some(v => v > 0)) {
       state.mergeNotify({
         compression: stats,

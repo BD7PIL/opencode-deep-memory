@@ -96,7 +96,6 @@ export class PluginState {
   private _projectModel: { providerID: string; modelID: string } | undefined;
   private _fallbackModel: { providerID: string; modelID: string } | undefined;
   private _pendingResumes = new Map<string, PendingResumeInfo>();
-  private _pendingEnrichments = new Set<string>();
   private _lastUserText = new Map<string, string>();
   private _pendingNotify: PendingNotify | null = null;
   private _toolSignatures = new Map<string, string>();
@@ -107,6 +106,9 @@ export class PluginState {
   private _lastCCRCleanup = 0;
   private _modelContextWindow = 0;
   private _recentEdits = new Set<string>();
+  private _memoryCache: { content: string; mtime: number } | undefined;
+  private _pendingCompression: { keepRecent: number; requestedAt: number } | undefined;
+  private _greetedSessions = new Set<string>();
 
   agentOf(sessionID: string): string | undefined {
     return this._agents.get(sessionID);
@@ -180,30 +182,6 @@ export class PluginState {
   /** Check whether a pending resume flag exists for a sessionID. */
   hasPendingResume(sessionID: string): boolean {
     return this._pendingResumes.has(sessionID);
-  }
-
-  /**
-   * Mark a sessionID as having a pending enrichment.
-   * Called by the compacting hook after writing checkpoint.md.
-   */
-  setPendingEnrichment(sessionID: string): void {
-    this._pendingEnrichments.add(sessionID);
-  }
-
-  /**
-   * Consume (read + delete) the pending enrichment flag.
-   * Returns true if the flag was set, false if not.
-   * Idempotent: second call returns false.
-   */
-  consumePendingEnrichment(sessionID: string): boolean {
-    const had = this._pendingEnrichments.has(sessionID);
-    this._pendingEnrichments.delete(sessionID);
-    return had;
-  }
-
-  /** Check whether a pending enrichment flag exists for a sessionID. */
-  hasPendingEnrichment(sessionID: string): boolean {
-    return this._pendingEnrichments.has(sessionID);
   }
 
   recordLastUserText(sessionID: string, text: string): void {
@@ -322,6 +300,43 @@ export class PluginState {
 
   getRecentEdits(): string[] {
     return Array.from(this._recentEdits);
+  }
+
+  /** D5: mtime-based MEMORY.md cache for byte-stable system prompts. */
+  setMemoryCache(content: string, mtime: number): void {
+    this._memoryCache = { content, mtime };
+  }
+
+  getMemoryCache(): { content: string; mtime: number } | undefined {
+    return this._memoryCache;
+  }
+
+  isMemoryCacheFresh(currentMtime: number): boolean {
+    return this._memoryCache?.mtime === currentMtime;
+  }
+
+  clearMemoryCache(): void {
+    this._memoryCache = undefined;
+  }
+
+  requestCompression(keepRecent: number): void {
+    this._pendingCompression = { keepRecent, requestedAt: Date.now() };
+  }
+
+  consumeCompressionRequest(): { keepRecent: number } | undefined {
+    if (!this._pendingCompression) return undefined;
+    const req = this._pendingCompression;
+    this._pendingCompression = undefined;
+    return { keepRecent: req.keepRecent };
+  }
+
+  /** A: Session-start greeting — only inject memory whisper once per session. */
+  hasGreetedSession(sessionID: string): boolean {
+    return this._greetedSessions.has(sessionID);
+  }
+
+  markGreetedSession(sessionID: string): void {
+    this._greetedSessions.add(sessionID);
   }
 }
 

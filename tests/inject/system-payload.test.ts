@@ -7,10 +7,10 @@ import { createPluginState } from "../../src/hooks/shared-state.js";
 import { memoryFilePath } from "../../src/shared/paths.js";
 
 function createTmpDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "system-payload-test-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "system-payload-v4-"));
 }
 
-describe("composeSystemPayload", () => {
+describe("composeSystemPayload V4 (frozen TOOL_HINT + mtime-cached MEMORY.md)", () => {
   let tmpDir: string;
   let projectPath: string;
 
@@ -31,104 +31,76 @@ describe("composeSystemPayload", () => {
     fs.writeFileSync(memPath, content, "utf8");
   }
 
-  function setupCheckpointFile(content: string): void {
-    const cpPath = memoryFilePath("project", "checkpoint", projectPath);
-    fs.mkdirSync(path.dirname(cpPath), { recursive: true });
-    fs.writeFileSync(cpPath, content, "utf8");
-  }
-
-  it("emits only stable tool-hint for tool-subagent tier", async () => {
+  it("returns frozen TOOL_HINT containing memory tool names", async () => {
     const state = createPluginState();
-    state.recordAgent("sess-1", "explore");
-
-    const { stable, volatile } = await composeSystemPayload({
-      state, sessionID: "sess-1", projectPath, mode: "normal",
-    });
-
-    expect(stable).toContain("<deep-memory-stable>");
-    expect(stable).toContain("<tool-hint>");
-    expect(stable).toContain("memory_search");
-    expect(stable).toContain("</deep-memory-stable>");
-    expect(volatile).toBe("");
+    const { payload } = await composeSystemPayload({ state, projectPath });
+    expect(payload).toContain("memory_search");
+    expect(payload).toContain("memory_store");
+    expect(payload).toContain("memory_forget");
   });
 
-  it("emits stable with empty constraints when no MEMORY.md", async () => {
+  it("includes MEMORY.md content in payload when file exists", async () => {
     const state = createPluginState();
-    state.recordAgent("sess-1", "build");
-
-    const { stable, volatile } = await composeSystemPayload({
-      state, sessionID: "sess-1", projectPath, mode: "normal",
-    });
-
-    expect(stable).toContain("<deep-memory-stable>");
-    expect(stable).toContain("<tool-hint>");
-    expect(stable).toContain("<constraints>");
-    expect(stable).toContain("(empty)");
-    expect(stable).toContain("</constraints>");
-    expect(volatile).toContain("<deep-memory-volatile>");
-  });
-
-  it("emits MEMORY.md content in stable constraints", async () => {
-    const state = createPluginState();
-    state.recordAgent("sess-1", "build");
-
     setupMemoryFile("## Rules\nAlways use TypeScript.\n## Decisions\nUse vitest.\n");
-
-    const { stable } = await composeSystemPayload({
-      state, sessionID: "sess-1", projectPath, mode: "normal",
-    });
-
-    expect(stable).toContain("<constraints>");
-    expect(stable).toContain("Always use TypeScript.");
-    expect(stable).toContain("</constraints>");
+    const { payload } = await composeSystemPayload({ state, projectPath });
+    expect(payload).toContain("Always use TypeScript");
+    expect(payload).toContain("Use vitest");
   });
 
-  it("emits checkpoint in volatile when file exists", async () => {
+  it("does NOT include MEMORY.md content when file is absent", async () => {
     const state = createPluginState();
-    state.recordAgent("sess-1", "build");
-
-    setupMemoryFile("## Rules\nUse TS.");
-    setupCheckpointFile("## User Intent\nBuild auth system.\n## Decisions\nUse JWT.\n");
-
-    const { volatile } = await composeSystemPayload({
-      state, sessionID: "sess-1", projectPath, mode: "normal",
-    });
-
-    expect(volatile).toContain("<last-checkpoint>");
-    expect(volatile).toContain("Build auth system.");
-    expect(volatile).toContain("</last-checkpoint>");
+    const { payload } = await composeSystemPayload({ state, projectPath });
+    // TOOL_HINT is present, but no memory content
+    expect(payload).toContain("memory_search");
+    expect(payload).not.toContain("Always use TypeScript");
   });
 
-  it("works with post-resume mode for main tier", async () => {
+  it("reports cacheMiss on first call", async () => {
     const state = createPluginState();
-
-    const { stable, volatile } = await composeSystemPayload({
-      state, sessionID: undefined, projectPath, mode: "post-resume",
-    });
-
-    expect(stable).toContain("<deep-memory-stable>");
-    expect(stable).toContain("<constraints>");
-    expect(volatile).toContain("<deep-memory-volatile>");
+    setupMemoryFile("## Rules\nRule A\n");
+    const { cacheHit } = await composeSystemPayload({ state, projectPath });
+    expect(cacheHit).toBe(false);
   });
 
-  it("produces correct m[0]/m[1] structure for main tier with files", async () => {
+  it("reports cacheHit on second call when MEMORY.md unchanged", async () => {
     const state = createPluginState();
-    state.recordAgent("sess-1", "sisyphus");
+    setupMemoryFile("## Rules\nRule A\n");
+    await composeSystemPayload({ state, projectPath });
+    const { cacheHit } = await composeSystemPayload({ state, projectPath });
+    expect(cacheHit).toBe(true);
+  });
 
-    setupMemoryFile("## Rules\nBe concise.");
-    setupCheckpointFile("## Decisions\nUse ESM.");
+  it("reports cacheMiss when MEMORY.md mtime changes", async () => {
+    const state = createPluginState();
+    setupMemoryFile("## Rules\nRule A\n");
+    await composeSystemPayload({ state, projectPath });
 
-    const { stable, volatile } = await composeSystemPayload({
-      state, sessionID: "sess-1", projectPath, mode: "post-compaction",
-    });
+    // Simulate mtime change (rewrite file)
+    const memPath = memoryFilePath("project", "memory", projectPath);
+    await new Promise((r) => setTimeout(r, 20));
+    fs.writeFileSync(memPath, "## Rules\nRule B\n", "utf8");
 
-    expect(stable).toMatch(/<deep-memory-stable>/);
-    expect(stable).toMatch(/<tool-hint>.*memory_search.*<\/tool-hint>/s);
-    expect(stable).toMatch(/<constraints>[\s\S]*<\/constraints>/);
+    const { cacheHit, payload } = await composeSystemPayload({ state, projectPath });
+    expect(cacheHit).toBe(false);
+    expect(payload).toContain("Rule B");
+    expect(payload).not.toContain("Rule A");
+  });
 
-    expect(volatile).toMatch(/<deep-memory-volatile>/);
-    expect(volatile).toMatch(/<relevant>/);
-    expect(volatile).toMatch(/<last-checkpoint>[\s\S]*Use ESM[\s\S]*<\/last-checkpoint>/);
-    expect(volatile).toMatch(/<\/deep-memory-volatile>/);
+  it("produces byte-identical payload across calls when MEMORY.md unchanged", async () => {
+    const state = createPluginState();
+    setupMemoryFile("## Rules\nRule A\n## Decisions\nUse X.\n");
+    const first = await composeSystemPayload({ state, projectPath });
+    const second = await composeSystemPayload({ state, projectPath });
+    expect(second.payload).toBe(first.payload);
+  });
+
+  it("does NOT include any BM25 search results or repomap", async () => {
+    const state = createPluginState();
+    setupMemoryFile("## Rules\nRule A\n");
+    const { payload } = await composeSystemPayload({ state, projectPath });
+    expect(payload).not.toContain("<deep-memory-volatile>");
+    expect(payload).not.toContain("<relevant>");
+    expect(payload).not.toContain("repomap");
+    expect(payload).not.toContain("repo-map");
   });
 });
