@@ -100,9 +100,22 @@ export class Reconciler {
 
   /**
    * Incremental sync: detect changed/new/removed files and update the index.
+   *
+   * NOTE: On OpenCode restart the in-memory BM25Index is empty while
+   * .index-state.json still has mtime entries from the previous session.
+   * If the index is empty but state has entries, the incremental sync would
+   * wrongly skip all files (mtimes match) and leave the index empty.
+   * Force a full rebuild in that case.
    */
   async sync(): Promise<SyncResult> {
     await this.loadIndexState();
+
+    // After restart: BM25Index is empty, but .index-state.json has entries.
+    // Without this check, incremental sync skips all files and search returns 0 results.
+    if (this.index.size === 0 && Object.keys(this.indexState).length > 0) {
+      const result = await this.rebuild();
+      return { added: result.total, modified: 0, removed: 0 };
+    }
 
     const files = await this.enumerateAllMarkdown();
     const currentPaths = new Set(files.map((f) => f.path));
