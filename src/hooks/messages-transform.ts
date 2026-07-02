@@ -13,6 +13,11 @@ import type { Hooks } from "@opencode-ai/plugin";
 import type { PluginState } from "./shared-state.js";
 import type { Logger } from "../shared/log.js";
 import { runCompressionPipeline } from "../compress/index.js";
+import { extractTokensFromMessages } from "../compress/pressure.js";
+import { classifyForCompression } from "../compress/classifier.js";
+
+const NUDGE_THRESHOLD_TOKENS = 50_000;
+const NUDGE_EMERGENCY_TOKENS = 120_000;
 
 const KEEP_RECENT = 8;
 
@@ -167,33 +172,79 @@ export function createMessagesTransformHandler(
       logger?.debug("messages.transform: stripped", stats);
     }
 
-    const compressReq = state.consumeCompressionRequest();
+    // P1: Content-aware compression (context_compress tool)
+    const compressReq = state.consumeContentAwareCompression();
     if (compressReq) {
       const cutoff = messages.length - compressReq.keepRecent;
-      let agentCompressed = 0;
+      let compressed = 0;
+      const recentEdits = state.getRecentEdits();
+      const editSet = new Set(recentEdits);
+
       for (let i = 2; i < cutoff; i++) {
-        const msg = messages[i];
+        const msg = messages[i] as { info: { role: string }; parts: unknown[] } | undefined;
         if (!msg?.parts?.length) continue;
+
         for (const part of msg.parts) {
-          if (typeof part !== "object" || part === null) continue;
           const p = part as Record<string, unknown>;
           if (p["type"] !== "tool") continue;
           const toolState = p["state"] as Record<string, unknown> | undefined;
-          const output = typeof toolState?.["output"] === "string" ? toolState["output"] : "";
-          if (output.length < 500 || output.includes("deep_expand(")) continue;
-          const lines = output.split("\n");
-          if (lines.length < 20) continue;
-          const summary = lines.slice(0, 3).join("\n") +
-            `\n[... ${lines.length - 6} lines compressed — call deep_expand to restore ...]\n` +
-            lines.slice(-3).join("\n");
-          const { ccrStore, ccrInjectMarker } = await import("../compress/ccr.js");
-          const hash = ccrStore(state, output, summary, "context_compress");
-          toolState!["output"] = ccrInjectMarker(summary, hash);
-          agentCompressed++;
+          if (!toolState) continue;
+          const toolName = p["tool"] as string | undefined;
+          const output = typeof toolState["output"] === "string" ? toolState["output"] : "";
+          if (!output || output.includes("deep_expand(")) continue;
+
+          const decision = classifyForCompression(toolName, output, editSet);
+
+          if (decision === "preserve") continue;
+
+          if (decision === "transient") {
+            const lines = output.split("\n");
+            if (lines.length < 20) continue;
+            const capped = lines.slice(0, 10).join("\n") +
+              `\n[... ${lines.length - 20} lines compressed — call deep_expand to restore ...]\n` +
+              lines.slice(-10).join("\n");
+            const { ccrStore, ccrInjectMarker } = await import("../compress/ccr.js");
+            const hash = ccrStore(state, output, capped, toolName);
+            toolState["output"] = ccrInjectMarker(capped, hash);
+            compressed++;
+          } else if (decision === "stale") {
+            toolState["output"] = "[OUTDATED — file was edited since this read. Use read to get current content.]";
+            compressed++;
+          }
         }
       }
-      if (agentCompressed > 0) {
-        logger?.debug("messages.transform: agent-initiated compression", { agentCompressed });
+
+      // Inject summary block as assistant message at cutoff position
+      if (compressReq.summary) {
+        const summaryMsg = {
+          info: { role: "assistant" },
+          parts: [{
+            type: "text",
+            text: `[compressed-block: messages 1-${cutoff}]\n${compressReq.summary}\n[/compressed-block]`,
+          }],
+        };
+        messages.splice(cutoff, 0, summaryMsg as never);
+
+        // Mark old assistant messages in compressed zone
+        for (let i = 2; i < cutoff; i++) {
+          const msg = messages[i] as { info: { role: string }; parts: unknown[] } | undefined;
+          if (!msg?.parts) continue;
+          if (msg.info.role !== "assistant") continue;
+          for (const part of msg.parts) {
+            const p = part as Record<string, unknown>;
+            if (p["type"] !== "text") continue;
+            const text = p["text"] as string;
+            if (!text || text.includes("deep_expand(")) continue;
+            const { ccrStore } = await import("../compress/ccr.js");
+            const hash = ccrStore(state, text, "[compressed — see summary block above]", "assistant");
+            p["text"] = `[compressed — call deep_expand("${hash}") to restore original]`;
+            compressed++;
+          }
+        }
+      }
+
+      if (compressed > 0) {
+        logger?.debug("messages.transform: content-aware compression", { compressed, summaryLen: compressReq.summary.length });
       }
     }
 
@@ -222,6 +273,42 @@ export function createMessagesTransformHandler(
         protectedHead: PROTECTED_HEAD,
         protectedTail: KEEP_RECENT,
       });
+    }
+
+    // P3: Nudge injector — threshold/emergency/postcompact
+    const nudgeSessionID = (input as Record<string, unknown>)["sessionID"] as string | undefined;
+    if (nudgeSessionID) {
+      let nudgeText = "";
+      const estimated = extractTokensFromMessages(messages as never);
+
+      const postCompactNudge = state.consumePendingPostCompactNudge(nudgeSessionID);
+      if (postCompactNudge) {
+        nudgeText = `\n[context was compacted — context_compress tool is available if you need to reclaim token budget]`;
+      } else if (estimated >= NUDGE_EMERGENCY_TOKENS) {
+        nudgeText = `\n[context at emergency level (${Math.round(estimated / 1000)}K tokens) — use context_compress with a summary of older conversation to avoid compaction]`;
+      } else if (estimated >= NUDGE_THRESHOLD_TOKENS && state.tryNudge("threshold", nudgeSessionID)) {
+        nudgeText = `\n[context at ${Math.round(estimated / 1000)}K tokens — consider using context_compress with a summary of older conversation to reclaim space]`;
+      }
+
+      if (nudgeText) {
+        for (let i = messages.length - 1; i >= 0; i--) {
+          const msg = messages[i] as { info: { role: string }; parts: unknown[] } | undefined;
+          if (!msg?.parts) continue;
+          for (const part of msg.parts) {
+            const p = part as Record<string, unknown>;
+            const toolState = p["state"] as Record<string, unknown> | undefined;
+            if (p["type"] === "tool" && toolState && typeof toolState["output"] === "string") {
+              toolState["output"] += nudgeText;
+              logger?.debug("messages.transform: nudge injected", {
+                type: postCompactNudge ? "postcompact" : estimated >= NUDGE_EMERGENCY_TOKENS ? "emergency" : "threshold",
+                tokens: estimated,
+              });
+              break;
+            }
+          }
+          if (nudgeText && Object.values(messages[i]?.parts?.[0] ?? {}).length > 0) break;
+        }
+      }
     }
   };
 }

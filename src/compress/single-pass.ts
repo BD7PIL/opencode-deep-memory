@@ -28,7 +28,7 @@ const NEVER_DEDUP = new Set(["read", "bash", "grep", "glob", "find", "search"]);
 const ERROR_PURGE_TURN_THRESHOLD = 4;
 const PROTECTED_HEAD_SINGLE = 2;
 const ASSISTANT_COMPRESS_MIN_LENGTH = 500;
-const ASSISTANT_COMPRESS_SAVINGS_RATIO = 0.6;
+const ASSISTANT_COMPRESS_SAVINGS_RATIO = 0.7;
 
 function simpleHash(s: string): string {
   const len = s.length;
@@ -64,7 +64,6 @@ function compressAssistantText(text: string): string {
 
     if (/^#{1,3}\s/.test(line) ||
         /error|fail|warning|critical|important/i.test(line) ||
-        /^\s*[-*]\s/.test(line) ||
         /^\s*\d+\.\s/.test(line) ||
         /^\/[^\s:]+/.test(line)) {
       kept.push(line);

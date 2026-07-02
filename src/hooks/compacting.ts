@@ -17,7 +17,7 @@ import type { RepoMapTracker } from "../repomap/tracker.js";
 import { captureMessages } from "../extract/capture.js";
 import { extractHeuristics } from "../extract/heuristics.js";
 import { renderCheckpoint, writeCheckpoint } from "../extract/checkpoint-writer.js";
-import { consolidateMemory } from "../extract/consolidate.js";
+import { consolidateMemory, buildConsolidationPrompt } from "../extract/consolidate.js";
 import { estimateTokensSum } from "../shared/tokens.js";
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -32,6 +32,11 @@ interface SessionClient {
       path: { id: string };
       query?: { directory?: string; limit?: number };
     }): Promise<{ data: Array<{ info: unknown; parts: unknown[] }> | undefined }>;
+    create(opts: {
+      body: { parentID: string; title: string };
+      query?: { directory?: string };
+    }): Promise<unknown>;
+    promptAsync(opts: { path: { id: string }; body: { parts: unknown[]; agent?: string } }): Promise<unknown>;
   };
 }
 
@@ -52,7 +57,7 @@ export interface CompactingHandlerArgs {
 export function createCompactingHandler(
   args: CompactingHandlerArgs,
 ): NonNullable<Hooks["experimental.session.compacting"]> {
-  const { client, projectPath, logger, tracker } = args;
+  const { client, state, projectPath, logger, tracker } = args;
 
   return async (input, output) => {
     const { sessionID } = input;
@@ -132,7 +137,97 @@ export function createCompactingHandler(
         });
       }
 
-      // Step 5: Inject structured compaction prompt + handoff prefix
+      // Step 4b: Check pending LLM consolidation sub-session result
+      const pendingConsolidation = state.consumePendingConsolidation(sessionID);
+      if (pendingConsolidation) {
+        try {
+          const memPath = memoryFilePath("project", "memory", projectPath);
+          if (existsSync(memPath)) {
+            const currentMtime = (await readFile(memPath, "utf8").catch(() => null)) ? Date.now() : 0;
+            if (currentMtime > pendingConsolidation.memMtime) {
+              logger?.info("compacting: MEMORY.md changed since consolidation start, discarding LLM result");
+            } else {
+              const resp = await client.session.messages({ path: { id: pendingConsolidation.subSessionID }, query: { limit: 1 } });
+              const msgs = resp.data ?? [];
+              const lastAssistantMsg = msgs[msgs.length - 1];
+              if (lastAssistantMsg) {
+                for (const part of lastAssistantMsg.parts) {
+                  const p = part as { type?: string; text?: string };
+                  if (p.type === "text" && p.text) {
+                    const release = await acquireLock(memPath);
+                    try {
+                      const current = await readFile(memPath, "utf8");
+                      const currentStat = (await import("node:fs")).statSync(memPath);
+                      if (currentStat.mtimeMs > pendingConsolidation.memMtime) {
+                        logger?.info("compacting: MEMORY.md changed, discarding LLM consolidation result");
+                      } else {
+                        const backupPath = memPath.replace("MEMORY.md", "MEMORY.bak.md");
+                        await writeFile(backupPath, current, "utf8");
+                        await writeFile(memPath, p.text, "utf8");
+                        logger?.info("compacting: LLM consolidation applied", {
+                          beforeBytes: current.length,
+                          afterBytes: p.text.length,
+                        });
+                      }
+                    } finally { release(); }
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        } catch (err) {
+          logger?.warn("compacting: LLM consolidation extraction failed", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      state.persistPendingConsolidation(projectPath);
+
+      // Step 4c: If MEMORY.md is large enough, start new LLM consolidation sub-session
+      if (!pendingConsolidation) {
+        try {
+          const memPath = memoryFilePath("project", "memory", projectPath);
+          if (existsSync(memPath)) {
+            const content = await readFile(memPath, "utf8");
+            const lineCount = content.split("\n").length;
+            if (lineCount > 50) {
+              try {
+                const resp = await client.session.create({
+                  body: { parentID: sessionID, title: `Memory Consolidation ${new Date().toISOString().slice(0, 10)}` },
+                  query: { directory: projectPath },
+                });
+                const subID = (resp as { data?: { id: string } })?.data?.id;
+                if (subID) {
+                  const prompt = buildConsolidationPrompt(content);
+                  await client.session.promptAsync({
+                    path: { id: subID },
+                    body: { parts: [{ type: "text", text: prompt }], agent: "general" },
+                  });
+                  const memStat = (await import("node:fs")).statSync(memPath);
+                  state.setPendingConsolidation(sessionID, { subSessionID: subID, memMtime: memStat.mtimeMs });
+                  state.persistPendingConsolidation(projectPath);
+                  logger?.info("compacting: spawned LLM consolidation sub-session", {
+                    subSessionID: subID, lines: lineCount,
+                  });
+                }
+              } catch (spawnErr) {
+                logger?.warn("compacting: failed to spawn consolidation sub-session", {
+                  error: spawnErr instanceof Error ? spawnErr.message : String(spawnErr),
+                });
+              }
+            }
+          }
+        } catch (err) {
+          logger?.debug("compacting: no MEMORY.md to consolidate", { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
+      // Step 5: Signal PostCompact nudge on next messages.transform
+      state.setPendingPostCompactNudge(sessionID);
+
+      // Step 6: Inject structured compaction prompt + handoff prefix
       // Only on sessions with enough messages to justify structured summary
       if (capture.messageCount >= 20) {
         output.prompt = STRUCTURED_COMPACTION_PROMPT;

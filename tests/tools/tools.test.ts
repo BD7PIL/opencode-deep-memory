@@ -193,22 +193,26 @@ describe("createMemoryTools", () => {
     expect(tools.context_compress).toBeDefined();
   });
 
-  it("context_compress tool requests compression in state", async () => {
+  it("context_compress tool requests content-aware compression in state", async () => {
     const service = mockSearchService();
     const state = createPluginState();
     const tools = createMemoryTools(service, state, { projectPath: "/test" });
-    const result = await tools.context_compress.execute({ keep_recent: 5 }, mockContext());
-    expect(JSON.stringify(result)).toContain("Compression requested");
-    const req = state.consumeCompressionRequest();
+    const result = await tools.context_compress.execute(
+      { keep_recent: 5, summary: "Important decisions about build tooling" },
+      mockContext(),
+    );
+    expect(JSON.stringify(result)).toContain("Compression scheduled");
+    const req = state.consumeContentAwareCompression();
     expect(req).toBeDefined();
     expect(req!.keepRecent).toBe(5);
+    expect(req!.summary).toContain("build tooling");
   });
 
-  it("consumeCompressionRequest returns undefined after consumption", () => {
+  it("consumeContentAwareCompression returns undefined after consumption", () => {
     const state = createPluginState();
-    state.requestCompression(8);
-    state.consumeCompressionRequest();
-    expect(state.consumeCompressionRequest()).toBeUndefined();
+    state.requestContentAwareCompression({ keepRecent: 8, summary: "test" });
+    state.consumeContentAwareCompression();
+    expect(state.consumeContentAwareCompression()).toBeUndefined();
   });
 
   it("includes memory_expand when projectPath is provided", () => {

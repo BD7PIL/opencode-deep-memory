@@ -16,6 +16,8 @@ function mockClient(messages: Array<{ info: unknown; parts: unknown[] }>) {
   return {
     session: {
       messages: vi.fn().mockResolvedValue({ data: messages }),
+      create: vi.fn().mockResolvedValue({ data: { id: "mock-sub" } }),
+      promptAsync: vi.fn().mockResolvedValue(undefined),
     },
   };
 }
@@ -98,6 +100,8 @@ describe("createCompactingHandler", () => {
     const client = {
       session: {
         messages: vi.fn().mockRejectedValue(new Error("SDK failure")),
+        create: vi.fn(),
+        promptAsync: vi.fn(),
       },
     };
     const handler = createCompactingHandler({ client, state, projectPath });

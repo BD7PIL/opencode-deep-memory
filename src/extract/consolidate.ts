@@ -1,8 +1,27 @@
 /**
  * Layer 5: Synchronous consolidation. No background, no LLM.
- * SimHash dedup + stale-entry purge. Runs in-hook.
+ * SimHash dedup + stale-entry purge + LLM consolidation prompt. Runs in-hook.
  * See DESIGN_V4.md Layer 5.
  */
+
+export function buildConsolidationPrompt(content: string): string {
+  return `You are a memory consolidation agent. Below is the current project MEMORY.md content.
+Your job is to refine it for quality — merge duplicates, delete stale entries, refine vague ones.
+Output ONLY the consolidated MEMORY.md content, nothing else.
+
+Rules:
+1. MERGE: Combine entries saying the same thing in different words into one clear entry.
+2. DELETE: Remove entries clearly outdated or superseded by newer entries. Keep unique entries.
+3. REFINE: Make vague entries more precise while preserving factual content.
+4. KEEP: Preserve entries that are unique and useful. Do NOT invent new information.
+5. FORMAT: Keep ## Heading + bullet format. Same sections: Decisions, Constraints, Gotchas, Facts.
+6. SIZE: Stay under 200 lines. If over, move overflow to ## Archive section.
+
+Current MEMORY.md:
+---
+${content}
+---`;
+}
 
 interface ConsolidateOpts {
   staleFilePaths?: string[];

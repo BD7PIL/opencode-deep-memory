@@ -125,8 +125,8 @@ async function main() {
 
   console.log();
   console.log("--- V4: context_compress tool requests compression ---");
-  const compressResult = await hooks.tool.context_compress.execute({ keep_recent: 5 });
-  check("context_compress returns confirmation", JSON.stringify(compressResult).includes("Compression requested"));
+  const compressResult = await hooks.tool.context_compress.execute({ keep_recent: 5, summary: "Test summary of old content" });
+  check("context_compress returns confirmation", JSON.stringify(compressResult).includes("Compression scheduled"));
 
   console.log();
   console.log("--- V4: storage layout ---");

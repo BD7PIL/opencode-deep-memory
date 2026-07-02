@@ -55,6 +55,11 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
     });
   }
 
+  const restored = state.restorePendingConsolidation(projectPath);
+  if (restored) {
+    logger.info("opencode-deep-memory: restored pending consolidation");
+  }
+
   const searchService = new SearchService({
     dataRoot,
     projectPath,
@@ -212,7 +217,7 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
     },
 
     "experimental.session.compacting": createCompactingHandler({
-      client: input.client,
+      client: input.client as never,
       state,
       projectPath,
       logger: logger.for("compacting"),

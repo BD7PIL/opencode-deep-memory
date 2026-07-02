@@ -1,10 +1,9 @@
 /**
  * Cross-hook in-memory state for opencode-deep-memory plugin.
- *
- * Owns:
- *   - sessionID → agent mapping (populated by chat.params, consumed by system.transform)
- *   - pendingResume flags (set by session.created event, consumed by system.transform)
  */
+
+import path from "node:path";
+import fs from "node:fs";
 
 export interface AgentSessionMap {
   /** Map<sessionID, agent> */
@@ -107,8 +106,11 @@ export class PluginState {
   private _modelContextWindow = 0;
   private _recentEdits = new Set<string>();
   private _memoryCache: { content: string; mtime: number } | undefined;
-  private _pendingCompression: { keepRecent: number; requestedAt: number } | undefined;
+  private _pendingContentAwareCompression: { keepRecent: number; summary: string; requestedAt: number } | undefined;
   private _greetedSessions = new Set<string>();
+  private _nudgedSessions = new Map<string, Set<string>>();
+  private _pendingPostCompactNudges = new Set<string>();
+  private _pendingConsolidation: Record<string, { subSessionID: string; memMtime: number }> = {};
 
   agentOf(sessionID: string): string | undefined {
     return this._agents.get(sessionID);
@@ -319,24 +321,96 @@ export class PluginState {
     this._memoryCache = undefined;
   }
 
-  requestCompression(keepRecent: number): void {
-    this._pendingCompression = { keepRecent, requestedAt: Date.now() };
-  }
-
-  consumeCompressionRequest(): { keepRecent: number } | undefined {
-    if (!this._pendingCompression) return undefined;
-    const req = this._pendingCompression;
-    this._pendingCompression = undefined;
-    return { keepRecent: req.keepRecent };
-  }
-
   /** A: Session-start greeting — only inject memory whisper once per session. */
   hasGreetedSession(sessionID: string): boolean {
     return this._greetedSessions.has(sessionID);
   }
 
+  /** P1: schedule content-aware compression (triggered by context_compress tool). */
+  requestContentAwareCompression(req: { keepRecent: number; summary: string }): void {
+    this._pendingContentAwareCompression = { ...req, requestedAt: Date.now() };
+  }
+
+  consumeContentAwareCompression(): { keepRecent: number; summary: string } | undefined {
+    if (!this._pendingContentAwareCompression) return undefined;
+    const req = this._pendingContentAwareCompression;
+    this._pendingContentAwareCompression = undefined;
+    return { keepRecent: req.keepRecent, summary: req.summary };
+  }
+
   markGreetedSession(sessionID: string): void {
     this._greetedSessions.add(sessionID);
+  }
+
+  /** P3: threshold nudge fires once per session; emergency always fires. */
+  tryNudge(type: "threshold" | "emergency", sessionID: string): boolean {
+    if (type === "emergency") return true;
+    let set = this._nudgedSessions.get(sessionID);
+    if (!set) { set = new Set(); this._nudgedSessions.set(sessionID, set); }
+    if (set.has(type)) return false;
+    set.add(type);
+    return true;
+  }
+
+  setPendingPostCompactNudge(sessionID: string): void {
+    this._pendingPostCompactNudges.add(sessionID);
+  }
+
+  consumePendingPostCompactNudge(sessionID: string): boolean {
+    const had = this._pendingPostCompactNudges.has(sessionID);
+    this._pendingPostCompactNudges.delete(sessionID);
+    return had;
+  }
+
+  resetNudges(sessionID: string): void {
+    this._nudgedSessions.delete(sessionID);
+  }
+
+  /** P0: set pending consolidation sub-session. */
+  setPendingConsolidation(sessionID: string, info: { subSessionID: string; memMtime: number }): void {
+    this._pendingConsolidation[sessionID] = info;
+  }
+
+  /** P0: consume pending consolidation (destructive read). */
+  consumePendingConsolidation(sessionID: string): { subSessionID: string; memMtime: number } | undefined {
+    const info = this._pendingConsolidation[sessionID];
+    delete this._pendingConsolidation[sessionID];
+    return info;
+  }
+
+  /** P0 (Grill #5): persist pending consolidation to survive restarts. */
+  persistPendingConsolidation(projectDir: string): void {
+    const keys = Object.keys(this._pendingConsolidation);
+    if (keys.length === 0) {
+      const filePath = path.join(projectDir, ".pending-consolidation.json");
+      try { fs.unlinkSync(filePath); } catch {}
+      return;
+    }
+    const sid = keys[0];
+    const info = this._pendingConsolidation[sid];
+    const filePath = path.join(projectDir, ".pending-consolidation.json");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify({ sessionID: sid, subSessionID: info.subSessionID, memMtime: info.memMtime }),
+      "utf8",
+    );
+  }
+
+  /** P0 (Grill #5): restore pending consolidation from file. Returns true if restored. */
+  restorePendingConsolidation(projectDir: string): boolean {
+    const filePath = path.join(projectDir, ".pending-consolidation.json");
+    try {
+      const raw = fs.readFileSync(filePath, "utf8");
+      const parsed = JSON.parse(raw) as { sessionID: string; subSessionID: string; memMtime: number };
+      if (parsed.sessionID && parsed.subSessionID) {
+        this._pendingConsolidation[parsed.sessionID] = { subSessionID: parsed.subSessionID, memMtime: parsed.memMtime };
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
   }
 }
 
