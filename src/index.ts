@@ -18,6 +18,7 @@ import path from "node:path";
 
 import { createLogger, resolveDataRoot, acquireLock } from "./shared/index.js";
 import { migrateV3toV4 } from "./shared/migrate.js";
+import { installPluginCommands } from "./shared/install-commands.js";
 import { projectMemoryDir } from "./shared/paths.js";
 import { createPluginState } from "./hooks/shared-state.js";
 import { createChatParamsHandler } from "./hooks/chat-params.js";
@@ -54,6 +55,8 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
       error: err instanceof Error ? err.message : String(err),
     });
   }
+
+  installPluginCommands(projectPath, logger.for("installCommands"));
 
   const restored = state.restorePendingConsolidation(projectPath);
   if (restored) {

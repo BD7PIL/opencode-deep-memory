@@ -143,7 +143,7 @@ export function createCompactingHandler(
         try {
           const memPath = memoryFilePath("project", "memory", projectPath);
           if (existsSync(memPath)) {
-            const currentMtime = (await readFile(memPath, "utf8").catch(() => null)) ? Date.now() : 0;
+            const currentMtime = (await import("node:fs")).statSync(memPath).mtimeMs;
             if (currentMtime > pendingConsolidation.memMtime) {
               logger?.info("compacting: MEMORY.md changed since consolidation start, discarding LLM result");
             } else {
