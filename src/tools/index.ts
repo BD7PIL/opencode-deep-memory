@@ -11,15 +11,15 @@ import { ccrRetrieve } from "../compress/ccr.js";
 export function createMemoryTools(
   service: SearchService,
   state: PluginState,
-  opts?: { projectPath?: string },
+  opts?: { projectPath?: string; client?: unknown },
 ) {
   const search = createMemorySearchTool(service);
-  const store = createMemoryStoreTool(service);
+  const store = createMemoryStoreTool(service, state);
   const forget = createMemoryForgetTool(service);
   const expand = opts?.projectPath
     ? createMemoryExpandTool({ projectPath: opts.projectPath })
     : createMemoryExpandTool({ projectPath: "" });
-  const compress = createContextCompressTool(state);
+  const compress = createContextCompressTool(state, opts?.client, opts?.projectPath ?? "");
 
   return {
     memory_search: search,

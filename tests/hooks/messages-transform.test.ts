@@ -72,7 +72,7 @@ describe("createMessagesTransformHandler", () => {
 
   // 1. Empty messages array → no-op
   it("no-ops on empty messages array", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
+    const handler = createMessagesTransformHandler(state, undefined, logger as never);
     const output = makeOutput([]);
     await handler({} as never, output as never);
     expect(output.messages.length).toBe(0);
@@ -81,7 +81,7 @@ describe("createMessagesTransformHandler", () => {
 
   // 2. ≤8 messages → no-op
   it("no-ops when messages.length <= 8", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
+    const handler = createMessagesTransformHandler(state, undefined, logger as never);
     const msgs = fillerMessages(8);
     // Add reasoning to a message — should NOT be cleared
     msgs[0] = mockMessage("assistant", [
@@ -96,7 +96,7 @@ describe("createMessagesTransformHandler", () => {
 
   // 3. User messages NEVER touched (even if old)
   it("never touches user messages even if old", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
+    const handler = createMessagesTransformHandler(state, undefined, logger as never);
     const msgs = [
       mockMessage("user", [{ type: "text", text: "user query" }], "u-1"),
       ...fillerMessages(8),
@@ -109,7 +109,7 @@ describe("createMessagesTransformHandler", () => {
 
   // 4. Recent 8 messages preserved (even if assistant with reasoning)
   it("preserves reasoning in recent 8 messages", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
+    const handler = createMessagesTransformHandler(state, undefined, logger as never);
     const recent = mockMessage("assistant", [
       { type: "reasoning", text: "recent reasoning", metadata: {} },
     ], "recent-1");
@@ -131,7 +131,7 @@ describe("createMessagesTransformHandler", () => {
 
   // 5. Old reasoning parts removed entirely (not replaced with marker)
   it("removes old reasoning parts entirely", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
+    const handler = createMessagesTransformHandler(state, undefined, logger as never);
     const { messages: msgs, targetIdx } = buildStripTestMessages(
       [{ type: "reasoning", text: "some reasoning", metadata: {} }],
       "r-1",
@@ -148,7 +148,7 @@ describe("createMessagesTransformHandler", () => {
 
   // 6. openrouter.reasoning_details metadata stripped before part removal
   it("strips openrouter.reasoning_details metadata before removal", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
+    const handler = createMessagesTransformHandler(state, undefined, logger as never);
     const reasoningMeta = { openrouter: { reasoning_details: [{ text: "chain of thought" }] } };
     const { messages: msgs, targetIdx } = buildStripTestMessages(
       [{ type: "reasoning", text: "old", metadata: reasoningMeta }],
@@ -166,7 +166,7 @@ describe("createMessagesTransformHandler", () => {
 
   // 7. System injection messages removed entirely (not replaced with sentinel)
   it("removes system-injected messages entirely", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
+    const handler = createMessagesTransformHandler(state, undefined, logger as never);
     const { messages: msgs, targetIdx } = buildStripTestMessages(
       [{ type: "text", text: "<system-reminder>Do the thing</system-reminder>" }],
       "sys-1",
@@ -185,7 +185,7 @@ describe("createMessagesTransformHandler", () => {
 
   // 8. Tool error >100 chars truncated
   it("truncates tool errors > 100 chars", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
+    const handler = createMessagesTransformHandler(state, undefined, logger as never);
     const longError = "x".repeat(200);
     const { messages: msgs, targetIdx } = buildStripTestMessages(
       [{ type: "tool", state: { status: "error", error: longError } }],
@@ -204,7 +204,7 @@ describe("createMessagesTransformHandler", () => {
 
   // 9. Inline <thinking> tags stripped from text parts
   it("strips inline thinking tags from text parts", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
+    const handler = createMessagesTransformHandler(state, undefined, logger as never);
     const { messages: msgs, targetIdx } = buildStripTestMessages(
       [{ type: "text", text: "Hello <thinking>internal thought</thinking> world" }],
       "t-1",
@@ -220,7 +220,7 @@ describe("createMessagesTransformHandler", () => {
   });
 
   it("strips inline <think> tags from text parts", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
+    const handler = createMessagesTransformHandler(state, undefined, logger as never);
     const { messages: msgs, targetIdx } = buildStripTestMessages(
       [{ type: "text", text: "Prefix <think>short</think> suffix" }],
       "t-1",
@@ -233,7 +233,7 @@ describe("createMessagesTransformHandler", () => {
 
   // 10. Mixed content (text + tool) NOT over-stripped
   it("does not over-strip mixed content messages", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
+    const handler = createMessagesTransformHandler(state, undefined, logger as never);
     const { messages: msgs, targetIdx } = buildStripTestMessages(
       [
         { type: "text", text: "Here is my analysis:" },
@@ -253,7 +253,7 @@ describe("createMessagesTransformHandler", () => {
 
   // 11. Stats logged when stripping occurs
   it("logs stats when any stripping occurs", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
+    const handler = createMessagesTransformHandler(state, undefined, logger as never);
     const { messages: msgs } = buildStripTestMessages(
       [
         { type: "reasoning", text: "old reasoning" },
@@ -274,7 +274,7 @@ describe("createMessagesTransformHandler", () => {
 
   // 12. Empty text message (system injection pattern /^$/) removed entirely
   it("removes empty text messages entirely", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
+    const handler = createMessagesTransformHandler(state, undefined, logger as never);
     const { messages: msgs, targetIdx } = buildStripTestMessages(
       [{ type: "text", text: "" }],
       "empty-1",
@@ -288,7 +288,7 @@ describe("createMessagesTransformHandler", () => {
 
   // 13. Tool error ≤100 chars NOT truncated
   it("does not truncate tool errors <= 100 chars", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
+    const handler = createMessagesTransformHandler(state, undefined, logger as never);
     const shortError = "short error";
     const { messages: msgs, targetIdx } = buildStripTestMessages(
       [{ type: "tool", state: { status: "error", error: shortError } }],
@@ -307,7 +307,7 @@ describe("createMessagesTransformHandler", () => {
 
   // 14. Metadata parts (step-start, etc.) are skipped
   it("skips metadata parts without modification", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
+    const handler = createMessagesTransformHandler(state, undefined, logger as never);
     const { messages: msgs, targetIdx } = buildStripTestMessages(
       [
         { type: "step-start", text: "step info" },
@@ -325,7 +325,7 @@ describe("createMessagesTransformHandler", () => {
 
   // 15. Already-removed reasoning (empty parts) handled correctly
   it("handles already-empty parts correctly", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
+    const handler = createMessagesTransformHandler(state, undefined, logger as never);
     const { messages: msgs } = buildStripTestMessages(
       [],  // empty parts — nothing to remove
       "already-1",
@@ -341,7 +341,7 @@ describe("createMessagesTransformHandler", () => {
 
   // C1: No-op when messages.length <= KEEP_RECENT + PROTECTED_HEAD (11)
   it("C1: no-ops when messages.length <= 11 (KEEP_RECENT + PROTECTED_HEAD)", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
+    const handler = createMessagesTransformHandler(state, undefined, logger as never);
     // 11 messages: exactly at the threshold — should be no-op
     const msgs = [
       mockMessage("assistant", [{ type: "reasoning", text: "old", metadata: {} }], "r-1"),
@@ -356,7 +356,7 @@ describe("createMessagesTransformHandler", () => {
 
   // C1: First 3 messages (protected head) are never touched
   it("C1: preserves first 3 messages even when old", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
+    const handler = createMessagesTransformHandler(state, undefined, logger as never);
     const { messages: msgs, targetIdx } = buildStripTestMessages(
       [{ type: "reasoning", text: "strippable reasoning", metadata: {} }],
       "target-1",
@@ -378,7 +378,7 @@ describe("createMessagesTransformHandler", () => {
   });
 
   it("does not modify tool_use that has a matching tool_result", async () => {
-    const handler = createMessagesTransformHandler(state, logger as never);
+    const handler = createMessagesTransformHandler(state, undefined, logger as never);
     const { messages: msgs } = buildStripTestMessages(
       [{ type: "text", text: "real content" }],
       "target-1",

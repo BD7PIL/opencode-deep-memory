@@ -1,6 +1,6 @@
 {
   "name": "@bd7pil/opencode-deep-memory",
-  "version": "0.10.2",
+  "version": "0.11.0",
   "description": "Persistent context intelligence for OpenCode — cross-session memory, compaction checkpoints, context reconstruction.",
   "type": "module",
   "main": "dist/index.js",
@@ -22,7 +22,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "smoke": "node scripts/smoke.mjs",
-    "verify": "npm run typecheck && npm test && npm run build && npm run smoke",
+    "e2e": "node scripts/e2e.mjs",
+    "verify": "npm run typecheck && npm test && npm run build && npm run smoke && npm run e2e",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

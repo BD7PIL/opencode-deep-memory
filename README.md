@@ -2,7 +2,7 @@
 
 > Persistent cross-session memory for [OpenCode](https://github.com/anomalyco/opencode) — zero runtime dependencies.
 
-V5 architecture. Built on research from 7 production coding agents, 30+ memory systems, and 5 academic papers. Eliminates the two independent LLM output degradation paths found in V2 (volatile system-prompt injection and post-hoc tool output compression), and adds LLM-driven memory consolidation + content-aware compression.
+V5.1 architecture: three-layer optimization — deterministic noise reduction, intelligent context compression (main-agent-triggered + subagent-executed), and increment-based memory consolidation. Built on research from 7 production coding agents, 30+ memory systems, and 5 academic papers.
 
 ## Quick start
 
@@ -21,13 +21,15 @@ Memory lives at `.deep-memory/` in your project root.
 ## What it does
 
 | Capability | How |
-|---|---|
+|---|---|---|
 | **Remember** decisions, constraints, gotchas, facts | `memory_store` → BM25-indexed `MEMORY.md` (200 line cap) |
 | **Retrieve** across sessions | `memory_search` — BM25 + CJK bigram |
 | **Forget** stale entries | `memory_forget` — by query + confirmation |
 | **Recover** compressed content | `deep_expand` / `memory_expand` — SHA-256 CCR, 30min cache |
-| **Compress** on demand | `context_compress` — content-aware, agent provides summary |
-| **Consolidate** memory quality | LLM subagent (compaction-triggered), mtime race-safe |
+| **Compress** on demand (summary) | `context_compress(summary)` — main agent writes summary |
+| **Compress** on demand (subagent) | `context_compress()` — main agent selects range, subagent generates summary |
+| **Consolidate** memory quality | LLM subagent (increment-triggered on idle: +20 lines or +8 calls), mtime race-safe |
+| **Notifications** | Subagent spawn/complete/discard via TUI Toast (zero LLM context pollution) |
 | **Commands** | `/checkpoint` — manual memory capture + dedup |
 
 ## V5 changes from V4
@@ -38,6 +40,26 @@ Memory lives at `.deep-memory/` in your project root.
 | P1: Content-aware compress | `context_compress` accepts `summary` parameter (LLM-written). Tool outputs classified as transient/bash, stale/read-of-edited-file, summarize/other, preserve/protected. Summary block injected as assistant message (not user message, avoids breaking "never touch user messages" rule). |
 | P2: Keep-pattern tightening | `compressAssistantText` removed bullet points (`-`/`*`) from retained lines. Savings ratio 0.6→0.7. V4 benchmark: 25% trigger rate → V5: ~40%. |
 | P3: Event-driven nudges | Three nudge types: threshold (≥50K tokens, once per session), emergency (≥120K), PostCompact (after compaction). Injected into last tool result, not per-message. Cooldown prevents obsessive loops (DCP Issue #439). |
+
+## V5.1 changes from V5
+
+| Change | Detail |
+|---|---|
+| **Trigger: consolidation** | Changed from compaction-only to idle-triggered (session.idle) when MEMORY.md grows ≥20 lines or ≥8 memory_store calls since last consolidation. Compaction remains as fallback. |
+| **Trigger: intelligent compression** | `context_compress()` without `summary` spawns a general-agent subsession to generate the summary, then applies it via messages.transform on the next turn. Main agent selects the range (by `keep_recent`), subagent does the summarization work — zero main-agent context consumption. |
+| **Toast notifications** | Subagent spawn/complete/discard → `client.tui.showToast` (DCP-style `▣` prefix, DCP-style 5s duration). Memory consolidation and context compression subagents both notify. |
+| **Legacy notifications removed** | Per-turn compression stats (`strip_thinking`, `truncate_error`) and system injection stats no longer produce toasts. Only subagent operations produce notifications. |
+| **`memory_store` counter** | Every `memory_store` call increments a counter used by the idle consolidation trigger. When the counter reaches 8, the next idle consolidates. |
+
+### V5.1 trigger architecture
+
+```
+Layer 1 (every turn):   messages.transform → deterministic strip/throttle/compress
+Layer 2 (main agent):   context_compress()  → optional subagent → summary injected via transform
+Layer 3 (session.idle): check MEMORY.md growth → spawn consolidation subagent → apply on next idle
+```
+
+The three layers are independent: Layer 1 runs every turn unchanged, Layer 2 fires when the main agent decides to compress, Layer 3 fires when enough memory changes accumulate.
 
 ## 6-Layer architecture
 
@@ -73,11 +95,13 @@ When MEMORY.md hasn't changed: 100% byte-stable system prompt across turns.
 
 On first turn: quiet `memory_search(userQuery)` runs. If top-1 BM25 score ≥ 2.0, a ≤30-token whisper is appended. Turns 2+: byte-stable. Zero whisper overhead.
 
-### Layer 5: Synchronous consolidation + LLM subagent
+### Layer 5: Increment-based memory consolidation
 
-Synchronous SimHash dedup runs on every compaction. When MEMORY.md exceeds 50 lines, an LLM subagent (created via `client.session.create` + `promptAsync`) processes it with Mem0-style ADD/UPDATE/DELETE logic. Results are applied on next compaction after mtime verification. No background processes, no `setInterval`, no fire-and-forget.
+Synchronous SimHash dedup runs on every compaction. When `memory_store` counter reaches 8 calls or MEMORY.md has grown ≥20 lines since last consolidation, an LLM subagent (created via `client.session.create` + `promptAsync`) processes it with Mem0-style ADD/UPDATE/DELETE logic. Triggered on `session.idle` — no compaction dependency. Results are applied on the next idle after mtime verification. Compaction hook preserved as fallback. No background processes, no `setInterval`, no fire-and-forget.
 
-### Layer 6: Content-aware agent-initiated compression
+Toast notification on: spawn (`▣ consolidation spawned`), applied (`▣ memory consolidated: N lines`), discarded (`▣ consolidation discarded (mtime race)`).
+
+### Layer 6: Agent-initiated compression with optional subagent summarization
 
 When the LLM calls `context_compress(summary, keep_recent)`, the next `messages.transform` pass:
 - Classifies tool outputs by content type (transient/stale/summarize/preserve)
@@ -85,6 +109,10 @@ When the LLM calls `context_compress(summary, keep_recent)`, the next `messages.
 - Marks stale reads of recently-edited files as `[OUTDATED]`
 - Injects LLM-written summary block as assistant message
 - Stores all originals in CCR for `deep_expand` recovery
+
+When the LLM calls `context_compress(keep_recent)` **without** summary, a background general-agent subsession is spawned with the compressible message range. The subsession generates a structured summary (goal/decisions/constraints/progress/errors), which `messages.transform` applies on the next turn. Zero main-agent context consumed for summarization.
+
+Toast on: spawn, applied, timeout (5min).
 
 ## Tools
 
@@ -95,15 +123,22 @@ When the LLM calls `context_compress(summary, keep_recent)`, the next `messages.
 | `memory_forget` | Find matching entries and remove them |
 | `memory_expand` | Restore original content from compressed conversation messages |
 | `deep_expand` | Restore original content from CCR-compressed tool output |
-| `context_compress` | Content-aware compression with LLM-written summary |
+| `context_compress` | Content-aware compression with optional subagent summarization. With `summary`: existing path (main agent writes). Without `summary`: background subagent generates summary. |
 
 ## Commands
 
 - `/checkpoint` — manually capture session state + consolidate MEMORY.md (SIMHash dedup + trigger LLM subagent if MEMORY.md > 50 lines)
 
-## Compaction
+## Compaction (fallback) + idle consolidation (primary)
 
-When OpenCode compacts a session:
+Memory consolidation triggers on `session.idle` (not compaction) when MEMORY.md has sufficient changes. Compaction hook is preserved as fallback:
+
+On session.idle (primary):
+1. Check MEMORY.md growth: ≥20 lines or ≥8 memory_store calls since last consolidation
+2. If no pending subagent result, spawn LLM subagent for ADD/UPDATE/DELETE consolidation
+3. On next idle: check subagent result, apply (mtime-verified), toast
+
+On session.compacted (fallback):
 1. Capture raw messages → `checkpoint.md` via 5 heuristic extractors
 2. SIMHash dedup of MEMORY.md (acquired via file lock, zero race conditions)
 3. Check pending LLM subagent consolidation result (mtime-verified, safe against concurrent `memory_store`)
@@ -212,6 +247,9 @@ V4+V5 designed through 4 rounds of research against production systems and acade
 - Nudges cannot be removed (DCP Issue #449, When2Tool paper)
 - Message IDs not injected (keep_recent summary covers 90% of scenarios; DCP Issue #573 feedback loop)
 - Nudges injected into tool result (When Attention Closes: mid-conversation > system prompt persistence)
+- Consolidation trigger: increment-based not pressure-based (compaction is too late — quality already degraded; idle + deltas is proactive)
+- Subagent compression: main agent selects range, subagent generates summary (hybrid — task understanding from main agent, context isolation from subagent)
+- Toast only for subagent operations (DCP `▣` format, 5s duration, zero LLM context pollution)
 
 ## License
 

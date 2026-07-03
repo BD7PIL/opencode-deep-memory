@@ -29,7 +29,7 @@ async function archiveEntry(filePath: string, entry: string): Promise<void> {
 /**
  * Create the memory_store tool bound to a SearchService instance.
  */
-export function createMemoryStoreTool(service: SearchService) {
+export function createMemoryStoreTool(service: SearchService, state?: { incrementMemoryStoreCount: () => void }) {
   return tool({
     description:
       "Store a memory entry (decision, constraint, gotcha, fact, note) to persistent memory.",
@@ -65,6 +65,7 @@ export function createMemoryStoreTool(service: SearchService) {
       }
 
       await service.addEntry(args.scope, "memory", section, contentWithDate);
+      state?.incrementMemoryStoreCount();
 
       return `Stored ${args.type} in ${args.scope} memory under ## ${section}`;
     },

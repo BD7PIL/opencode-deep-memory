@@ -89,6 +89,12 @@ export interface CCRCacheEntry {
   callID?: string;
 }
 
+type SubagentClient = {
+  session: {
+    messages: (args: { path: { id: string }; query?: { limit?: number } }) => Promise<{ data?: Array<Record<string, unknown>> }>;
+  };
+};
+
 export class PluginState {
   private _agents = new Map<string, string>();
   private _models = new Map<string, { providerID: string; modelID: string }>();
@@ -106,11 +112,15 @@ export class PluginState {
   private _modelContextWindow = 0;
   private _recentEdits = new Set<string>();
   private _memoryCache: { content: string; mtime: number } | undefined;
-  private _pendingContentAwareCompression: { keepRecent: number; summary: string; requestedAt: number } | undefined;
+  private _pendingContentAwareCompression: { keepRecent: number; summary: string; requestedAt: number; subSessionID?: string } | undefined;
+  private _compressionTimedOut = false;
   private _greetedSessions = new Set<string>();
   private _nudgedSessions = new Map<string, Set<string>>();
   private _pendingPostCompactNudges = new Set<string>();
   private _pendingConsolidation: Record<string, { subSessionID: string; memMtime: number }> = {};
+
+  private _memoryStoreSinceConsolidation = 0;
+  private _lastConsolidationMemLines = 0;
 
   agentOf(sessionID: string): string | undefined {
     return this._agents.get(sessionID);
@@ -327,7 +337,7 @@ export class PluginState {
   }
 
   /** P1: schedule content-aware compression (triggered by context_compress tool). */
-  requestContentAwareCompression(req: { keepRecent: number; summary: string }): void {
+  requestContentAwareCompression(req: { keepRecent: number; summary: string; subSessionID?: string }): void {
     this._pendingContentAwareCompression = { ...req, requestedAt: Date.now() };
   }
 
@@ -336,6 +346,64 @@ export class PluginState {
     const req = this._pendingContentAwareCompression;
     this._pendingContentAwareCompression = undefined;
     return { keepRecent: req.keepRecent, summary: req.summary };
+  }
+
+  async resolveContentAwareCompression(client: SubagentClient): Promise<{ keepRecent: number; summary: string } | undefined> {
+    const req = this._pendingContentAwareCompression;
+    if (!req) return undefined;
+
+    if (req.summary) {
+      this._pendingContentAwareCompression = undefined;
+      return { keepRecent: req.keepRecent, summary: req.summary };
+    }
+
+    if (req.subSessionID) {
+      if (Date.now() - req.requestedAt > 300_000) {
+        this._pendingContentAwareCompression = undefined;
+        this._compressionTimedOut = true;
+        return undefined;
+      }
+      try {
+        const resp = await client.session.messages({ path: { id: req.subSessionID }, query: { limit: 1 } });
+        const msgs = resp.data ?? [];
+        const last = msgs[msgs.length - 1] as { info?: { role?: string }; parts?: Array<{ type?: string; text?: string }> } | undefined;
+        if (last?.info?.role === "assistant") {
+          for (const part of last.parts ?? []) {
+            if (part.type === "text" && part.text) {
+              this._pendingContentAwareCompression = undefined;
+              return { keepRecent: req.keepRecent, summary: part.text };
+            }
+          }
+        }
+      } catch { /* subagent not ready, try next turn */ }
+    }
+
+    return undefined;
+  }
+
+  setCompressionTimedOut(): void {
+    this._compressionTimedOut = true;
+  }
+
+  consumeCompressionTimedOut(): boolean {
+    const v = this._compressionTimedOut;
+    this._compressionTimedOut = false;
+    return v;
+  }
+
+  incrementMemoryStoreCount(): void {
+    this._memoryStoreSinceConsolidation++;
+  }
+
+  shouldConsolidate(currentMemLines: number): boolean {
+    if (this._memoryStoreSinceConsolidation >= 8) return true;
+    if (currentMemLines > 0 && currentMemLines - this._lastConsolidationMemLines >= 20) return true;
+    return false;
+  }
+
+  recordConsolidationDone(currentMemLines: number): void {
+    this._memoryStoreSinceConsolidation = 0;
+    this._lastConsolidationMemLines = currentMemLines;
   }
 
   markGreetedSession(sessionID: string): void {

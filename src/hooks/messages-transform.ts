@@ -72,6 +72,7 @@ function isSystemInjected(msg: { parts: unknown[] }): boolean {
  */
 export function createMessagesTransformHandler(
   state: PluginState,
+  client: unknown,
   logger?: Logger,
 ): NonNullable<Hooks["experimental.chat.messages.transform"]> {
   return async (input, output) => {
@@ -172,8 +173,23 @@ export function createMessagesTransformHandler(
       logger?.debug("messages.transform: stripped", stats);
     }
 
-    // P1: Content-aware compression (context_compress tool)
-    const compressReq = state.consumeContentAwareCompression();
+    // P1: Content-aware compression (context_compress tool or subagent)
+    const compressReq = await state.resolveContentAwareCompression(client as never);
+
+    if (state.consumeCompressionTimedOut()) {
+      const tuiClient = (client as { tui?: { showToast?: (args: unknown) => Promise<unknown> } })?.tui;
+      if (tuiClient?.showToast) {
+        tuiClient.showToast({
+          body: {
+            title: "deep-memory",
+            message: "▣ deep-memory | compression timed out (5min)",
+            variant: "warning",
+            duration: 5000,
+          },
+        }).catch(() => {});
+      }
+    }
+
     if (compressReq) {
       const cutoff = messages.length - compressReq.keepRecent;
       let compressed = 0;
@@ -245,6 +261,18 @@ export function createMessagesTransformHandler(
 
       if (compressed > 0) {
         logger?.debug("messages.transform: content-aware compression", { compressed, summaryLen: compressReq.summary.length });
+
+        const tuiClient = (client as { tui?: { showToast?: (args: unknown) => Promise<unknown> } })?.tui;
+        if (tuiClient?.showToast) {
+          tuiClient.showToast({
+            body: {
+              title: "deep-memory",
+              message: `▣ deep-memory | context compressed: ${cutoff} msgs → summary block (${compressed} outputs compressed)`,
+              variant: "info",
+              duration: 5000,
+            },
+          }).catch(() => {});
+        }
       }
     }
 

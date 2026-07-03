@@ -38,6 +38,9 @@ interface SessionClient {
     }): Promise<unknown>;
     promptAsync(opts: { path: { id: string }; body: { parts: unknown[]; agent?: string } }): Promise<unknown>;
   };
+  tui?: {
+    showToast?(opts: { body: { title: string; message: string; variant: string; duration: number } }): Promise<unknown>;
+  };
 }
 
 export interface CompactingHandlerArgs {
@@ -146,6 +149,16 @@ export function createCompactingHandler(
             const currentMtime = (await import("node:fs")).statSync(memPath).mtimeMs;
             if (currentMtime > pendingConsolidation.memMtime) {
               logger?.info("compacting: MEMORY.md changed since consolidation start, discarding LLM result");
+              try {
+                await client.tui?.showToast?.({
+                  body: {
+                    title: "deep-memory",
+                    message: "▣ deep-memory | consolidation discarded (mtime race)",
+                    variant: "warning",
+                    duration: 5000,
+                  },
+                });
+              } catch {}
             } else {
               const resp = await client.session.messages({ path: { id: pendingConsolidation.subSessionID }, query: { limit: 1 } });
               const msgs = resp.data ?? [];
@@ -160,6 +173,16 @@ export function createCompactingHandler(
                       const currentStat = (await import("node:fs")).statSync(memPath);
                       if (currentStat.mtimeMs > pendingConsolidation.memMtime) {
                         logger?.info("compacting: MEMORY.md changed, discarding LLM consolidation result");
+                        try {
+                          await client.tui?.showToast?.({
+                            body: {
+                              title: "deep-memory",
+                              message: "▣ deep-memory | consolidation discarded (mtime race)",
+                              variant: "warning",
+                              duration: 5000,
+                            },
+                          });
+                        } catch {}
                       } else {
                         const backupPath = memPath.replace("MEMORY.md", "MEMORY.bak.md");
                         await writeFile(backupPath, current, "utf8");
