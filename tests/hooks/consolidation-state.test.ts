@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createPluginState } from "../../src/hooks/shared-state.js";
 
 describe("P0: PendingConsolidation state", () => {
@@ -24,5 +24,66 @@ describe("P0: PendingConsolidation state", () => {
     state.setPendingConsolidation("sess-1", { subSessionID: "sub-1", memMtime: 1000 });
     state.consumePendingConsolidation("sess-1");
     expect(state.consumePendingConsolidation("sess-1")).toBeUndefined();
+  });
+});
+
+describe("Consolidation cooldown (DCP #439 pattern)", () => {
+  let state: ReturnType<typeof createPluginState>;
+
+  beforeEach(() => {
+    state = createPluginState();
+  });
+
+  it("allows first consolidation attempt (no initial block)", () => {
+    expect(state.canStartConsolidation()).toBe(true);
+  });
+
+  it("blocks second attempt within cooldown window", () => {
+    state.recordConsolidationAttempt();
+    expect(state.canStartConsolidation()).toBe(false);
+  });
+
+  it("allows attempt after cooldown window expires (fake timers)", () => {
+    vi.useFakeTimers();
+    state.recordConsolidationAttempt();
+    expect(state.canStartConsolidation()).toBe(false);
+    // Advance 61 seconds — past the 60s cooldown
+    vi.advanceTimersByTime(61_000);
+    expect(state.canStartConsolidation()).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("blocks at exactly 59 seconds (still within window)", () => {
+    vi.useFakeTimers();
+    state.recordConsolidationAttempt();
+    vi.advanceTimersByTime(59_000);
+    expect(state.canStartConsolidation()).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it("allows multiple cycles (attempt → cooldown → attempt)", () => {
+    vi.useFakeTimers();
+    // First attempt
+    expect(state.canStartConsolidation()).toBe(true);
+    state.recordConsolidationAttempt();
+    expect(state.canStartConsolidation()).toBe(false);
+    // After cooldown
+    vi.advanceTimersByTime(61_000);
+    expect(state.canStartConsolidation()).toBe(true);
+    // Second attempt
+    state.recordConsolidationAttempt();
+    expect(state.canStartConsolidation()).toBe(false);
+    // After another cooldown
+    vi.advanceTimersByTime(61_000);
+    expect(state.canStartConsolidation()).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("recordConsolidationAttempt updates internal state", () => {
+    const before = state.canStartConsolidation();
+    expect(before).toBe(true);
+    state.recordConsolidationAttempt();
+    const after = state.canStartConsolidation();
+    expect(after).toBe(false);
   });
 });

@@ -128,6 +128,8 @@ export class PluginState {
 
   private _memoryStoreSinceConsolidation = 0;
   private _lastConsolidationMemLines = 0;
+  private _lastConsolidationAttempt = 0;
+  private static readonly CONSOLIDATION_COOLDOWN_MS = 60_000;
   agentOf(sessionID: string): string | undefined {
     return this._agents.get(sessionID);
   }
@@ -426,6 +428,15 @@ export class PluginState {
   recordConsolidationDone(currentMemLines: number): void {
     this._memoryStoreSinceConsolidation = 0;
     this._lastConsolidationMemLines = currentMemLines;
+  }
+
+  /** DCP #439 pattern: prevent rapid re-consolidation attempts. */
+  canStartConsolidation(): boolean {
+    return Date.now() - this._lastConsolidationAttempt > PluginState.CONSOLIDATION_COOLDOWN_MS;
+  }
+
+  recordConsolidationAttempt(): void {
+    this._lastConsolidationAttempt = Date.now();
   }
 
   markGreetedSession(sessionID: string): void {

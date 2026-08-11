@@ -17,7 +17,7 @@ import type { RepoMapTracker } from "../repomap/tracker.js";
 import { captureMessages } from "../extract/capture.js";
 import { extractHeuristics } from "../extract/heuristics.js";
 import { renderCheckpoint, writeCheckpoint } from "../extract/checkpoint-writer.js";
-import { consolidateMemory, buildConsolidationPrompt } from "../extract/consolidate.js";
+import { consolidateMemory, buildConsolidationPrompt, validateConsolidation } from "../extract/consolidate.js";
 import { estimateTokensSum } from "../shared/tokens.js";
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -203,6 +203,17 @@ export function createCompactingHandler(
                           });
                         } catch {}
                       } else {
+                        // Validate LLM output before writing (DCP #573 guard)
+                        const validation = validateConsolidation(current, p.text, { lines: current.split("\n").length });
+                        if (!validation.ok) {
+                          logger?.warn("compacting: consolidation rejected", { reason: validation.reason });
+                          try {
+                            await client.tui?.showToast?.({
+                              body: { title: "deep-memory", message: `▣ deep-memory | consolidation rejected (${validation.reason})`, variant: "warning", duration: 5000 },
+                            });
+                          } catch {}
+                          break;
+                        }
                         const backupPath = memPath.replace("MEMORY.md", "MEMORY.bak.md");
                         await writeFile(backupPath, current, "utf8");
                         await writeFile(memPath, p.text, "utf8");
@@ -232,6 +243,11 @@ export function createCompactingHandler(
       // Guard: skip if THIS session was itself plugin-spawned (e.g. we are compacting inside
       // an idle consolidation sub-session). Same root-cause guard as src/index.ts idle handler.
       if (!pendingConsolidation && !state.isSpawnedSubSession(sessionID)) {
+        // DCP #439 cooldown: prevent rapid re-consolidation attempts
+        if (!state.canStartConsolidation()) {
+          logger?.debug("compacting: consolidation cooldown active, skipping spawn");
+        } else {
+        state.recordConsolidationAttempt();
         try {
           const memPath = memoryFilePath("project", "memory", projectPath);
           if (existsSync(memPath)) {
@@ -245,7 +261,7 @@ export function createCompactingHandler(
                 });
                 const subID = (resp as { data?: { id: string } })?.data?.id;
                 if (subID) {
-                  const prompt = buildConsolidationPrompt(content);
+                  const prompt = buildConsolidationPrompt(content, { lines: lineCount, bytes: content.length });
                   const model = state.bestModel();
                   await client.session.promptAsync({
                     path: { id: subID },
@@ -272,6 +288,7 @@ export function createCompactingHandler(
           }
         } catch (err) {
           logger?.debug("compacting: no MEMORY.md to consolidate", { error: err instanceof Error ? err.message : String(err) });
+        }
         }
       }
 
