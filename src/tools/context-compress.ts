@@ -90,10 +90,15 @@ export function createContextCompressTool(state: PluginState, client: unknown, p
       }
 
       const prompt = buildCompressionPrompt(toCompress as never);
+      const model = state.bestModel();
       try {
         await typedClient.session.promptAsync({
           path: { id: subID },
-          body: { parts: [{ type: "text", text: prompt }], agent: "general" },
+          body: {
+            parts: [{ type: "text", text: prompt }],
+            agent: "general",
+            ...(model ? { model } : {}),
+          },
         });
       } catch {
         return { title: "Error", output: "Failed to prompt compression subagent." };

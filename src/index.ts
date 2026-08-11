@@ -300,6 +300,17 @@ async function handleIdleConsolidation(
         const msgs = resp.data ?? [];
         const lastAssistant = msgs[msgs.length - 1] as { info?: { role?: string }; parts?: Array<{ type?: string; text?: string }> } | undefined;
         if (lastAssistant?.info?.role === "assistant") {
+          // Detect LLM error (e.g. unsupported model, provider 400). The assistant
+          // message carries an error part instead of a text part.
+          const errorPart = (lastAssistant.parts ?? []).find(p => p.type === "error");
+          if (errorPart) {
+            logger.warn("idle consolidation: sub-session LLM failed", {
+              subSessionID: pending.subSessionID,
+              error: JSON.stringify(errorPart),
+            });
+            await showToast(typedClient, "▣ deep-memory | consolidation failed (LLM error, see log)", "warning");
+            return;
+          }
           for (const part of lastAssistant.parts ?? []) {
             if (part.type === "text" && part.text) {
               const release = await acquireLock(memPath);
@@ -340,9 +351,14 @@ async function handleIdleConsolidation(
     if (!subID) return;
 
     const prompt = buildConsolidationPrompt(content);
+    const model = state.bestModel();
     await typedClient.session.promptAsync({
       path: { id: subID },
-      body: { parts: [{ type: "text", text: prompt }], agent: "general" },
+      body: {
+        parts: [{ type: "text", text: prompt }],
+        agent: "general",
+        ...(model ? { model } : {}),
+      },
     });
 
     state.setPendingConsolidation(sessionID, { subSessionID: subID, memMtime: memStat.mtimeMs });

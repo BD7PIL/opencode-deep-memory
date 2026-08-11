@@ -164,8 +164,27 @@ export function createCompactingHandler(
               const msgs = resp.data ?? [];
               const lastAssistantMsg = msgs[msgs.length - 1];
               if (lastAssistantMsg) {
-                for (const part of lastAssistantMsg.parts) {
-                  const p = part as { type?: string; text?: string };
+                // Detect LLM error (e.g. unsupported model, provider 400).
+                const parts = (lastAssistantMsg.parts ?? []) as Array<{ type?: string; text?: string }>;
+                const errorPart = parts.find(p => p.type === "error");
+                if (errorPart) {
+                  logger?.warn("compacting: consolidation sub-session LLM failed", {
+                    subSessionID: pendingConsolidation.subSessionID,
+                    error: JSON.stringify(errorPart),
+                  });
+                  try {
+                    await client.tui?.showToast?.({
+                      body: {
+                        title: "deep-memory",
+                        message: "▣ deep-memory | consolidation failed (LLM error, see log)",
+                        variant: "warning",
+                        duration: 5000,
+                      },
+                    });
+                  } catch {}
+                } else {
+                for (const part of parts) {
+                  const p = part;
                   if (p.type === "text" && p.text) {
                     const release = await acquireLock(memPath);
                     try {
@@ -195,6 +214,7 @@ export function createCompactingHandler(
                     } finally { release(); }
                     break;
                   }
+                }
                 }
               }
             }
@@ -226,9 +246,14 @@ export function createCompactingHandler(
                 const subID = (resp as { data?: { id: string } })?.data?.id;
                 if (subID) {
                   const prompt = buildConsolidationPrompt(content);
+                  const model = state.bestModel();
                   await client.session.promptAsync({
                     path: { id: subID },
-                    body: { parts: [{ type: "text", text: prompt }], agent: "general" },
+                    body: {
+                      parts: [{ type: "text", text: prompt }],
+                      agent: "general",
+                      ...(model ? { model } : {}),
+                    },
                   });
                   const memStat = (await import("node:fs")).statSync(memPath);
                   state.setPendingConsolidation(sessionID, { subSessionID: subID, memMtime: memStat.mtimeMs });
