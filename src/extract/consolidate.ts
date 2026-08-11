@@ -4,23 +4,80 @@
  * See DESIGN_V4.md Layer 5.
  */
 
-export function buildConsolidationPrompt(content: string): string {
-  return `You are a memory consolidation agent. Below is the current project MEMORY.md content.
-Your job is to refine it for quality — merge duplicates, delete stale entries, refine vague ones.
-Output ONLY the consolidated MEMORY.md content, nothing else.
+export function buildConsolidationPrompt(
+  content: string,
+  stats: { lines: number; bytes: number },
+): string {
+  const targetLines = Math.round(stats.lines * 0.8);
+  return `You are a memory consolidation agent. Below is the current MEMORY.md
+(${stats.lines} lines, ${stats.bytes} bytes).
 
-Rules:
-1. MERGE: Combine entries saying the same thing in different words into one clear entry.
-2. DELETE: Remove entries clearly outdated or superseded by newer entries. Keep unique entries.
-3. REFINE: Make vague entries more precise while preserving factual content.
-4. KEEP: Preserve entries that are unique and useful. Do NOT invent new information.
-5. FORMAT: Keep ## Heading + bullet format. Same sections: Decisions, Constraints, Gotchas, Facts.
-6. SIZE: Stay under 200 lines. If over, move overflow to ## Archive section.
+## YOUR JOB
+Produce a LEANER, SHARPER version. If the memory is already well-organized,
+return it UNCHANGED.
+
+## CRITICAL RULES
+
+1. ACTIONABLE: Every surviving entry must name a specific future scenario
+   where it prevents a mistake or speeds up a decision. If you can't, DELETE it.
+2. NO PLATITUDES: Delete generic advice ("communicate clearly", "test
+   thoroughly", "冥想 improves focus"). Keep only entries with specific
+   technical details — file paths, function names, config values, errors.
+3. MERGE: Combine entries about the same topic. Two entries about HiDPI
+   scaling → one. Two about Python version limits → one.
+4. DELETE STALE: Remove entries that are:
+   - Superseded by a newer entry (compare [YYYY-MM-DD] date tags — the
+     LATER date is authoritative).
+   - Self-described as placeholder/dummy/sample/虚构/占位/example
+   - About a resolved problem that will never recur
+5. NEVER ADD: You are an editor, not a writer.
+   Zero new facts. Zero new decisions. Zero hallucination.
+6. SHRINK: Target ${targetLines} lines (70-90% of current). Under 200 hard cap.
+   If already under 150 lines and well-organized, return unchanged.
+7. WHEN UNCERTAIN between keeping and deleting, KEEP.
+   False retention is cheap; false deletion is irreversible.
+8. FORMAT: ## Heading + bullets. Sections: Decisions, Constraints, Gotchas,
+   Facts. Move superseded entries to ## Archive with a note.
+
+## PROCESS
+Step 1: For each entry, silently decide KEEP / MERGE / DELETE.
+Step 2: Output ONLY the consolidated MEMORY.md content. Do NOT output
+        your reasoning or decisions list.
 
 Current MEMORY.md:
 ---
 ${content}
 ---`;
+}
+
+/**
+ * Validate LLM consolidation output before applying to MEMORY.md.
+ * Prevents DCP #573 failure mode (738K tokens burned on unbounded summary growth).
+ *
+ * Checks:
+ * 1. Non-empty output
+ * 2. Output did not grow beyond 1.05x original (allows minor reformatting)
+ * 3. Output does not exceed 200-line hard cap
+ * 4. Output did not over-delete (<30% of original survived — suspicious for weak models)
+ */
+export function validateConsolidation(
+  original: string,
+  result: string,
+  originalStats: { lines: number },
+): { ok: true } | { ok: false; reason: string } {
+  if (result.trim().length === 0)
+    return { ok: false, reason: "empty output" };
+  if (result.length > original.length * 1.05)
+    return { ok: false, reason: `output grew: ${result.length} > ${original.length} * 1.05` };
+  const resultLines = result.split("\n").length;
+  if (resultLines > 200)
+    return { ok: false, reason: `${resultLines} lines exceeds 200-line cap` };
+  // Over-deletion guard: reject if <30% of original survived.
+  // A valid consolidation shrinks to 70-90%; anything below 30% is suspicious.
+  const minExpectedLines = Math.round(originalStats.lines * 0.3);
+  if (originalStats.lines > 20 && resultLines < minExpectedLines)
+    return { ok: false, reason: `over-deleted: ${resultLines} < ${minExpectedLines} (30% of ${originalStats.lines})` };
+  return { ok: true };
 }
 
 interface ConsolidateOpts {

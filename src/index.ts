@@ -32,7 +32,7 @@ import { RepoMapTracker } from "./repomap/tracker.js";
 import { getLanguage } from "./repomap/extractor.js";
 import { existsSync as existsSyncSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import { buildConsolidationPrompt } from "./extract/consolidate.js";
+import { buildConsolidationPrompt, validateConsolidation } from "./extract/consolidate.js";
 
 export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
   const cached = (globalThis as Record<string, unknown>)["__deepMemoryCachedHooks"] as Hooks | undefined;
@@ -315,6 +315,13 @@ async function handleIdleConsolidation(
             if (part.type === "text" && part.text) {
               const release = await acquireLock(memPath);
               try {
+                // Validate LLM output before writing (DCP #573 guard)
+                const validation = validateConsolidation(content, part.text, { lines: memLines });
+                if (!validation.ok) {
+                  logger.warn("idle consolidation: rejected", { reason: validation.reason });
+                  await showToast(typedClient, `▣ deep-memory | consolidation rejected (${validation.reason})`, "warning");
+                  return;
+                }
                 const current = await readFile(memPath, "utf8");
                 const backupPath = memPath.replace("MEMORY.md", "MEMORY.bak.md");
                 await writeFile(backupPath, current, "utf8");
@@ -339,6 +346,13 @@ async function handleIdleConsolidation(
 
   if (!state.shouldConsolidate(memLines)) return;
 
+  // DCP #439 cooldown: prevent rapid re-consolidation attempts
+  if (!state.canStartConsolidation()) {
+    logger.info("idle consolidation: cooldown active, skipping");
+    return;
+  }
+  state.recordConsolidationAttempt();
+
   try {
     const resp = await typedClient.session.create({
       body: {
@@ -350,7 +364,7 @@ async function handleIdleConsolidation(
     const subID = resp?.data?.id;
     if (!subID) return;
 
-    const prompt = buildConsolidationPrompt(content);
+    const prompt = buildConsolidationPrompt(content, { lines: memLines, bytes: content.length });
     const model = state.bestModel();
     await typedClient.session.promptAsync({
       path: { id: subID },

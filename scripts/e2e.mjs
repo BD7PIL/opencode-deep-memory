@@ -33,7 +33,22 @@ function makeClient(toastSpy) {
       messages: async (opts) => {
         if (opts?.query?.limit === 1) {
           return {
-            data: [{ info: { role: "assistant" }, parts: [{ type: "text", text: "Mock summary of compressed content.\n## Decisions\n- Test decision\n## Constraints\n- Test constraint\n## Gotchas\n- Test gotcha" }] }],
+            data: [{ info: { role: "assistant" }, parts: [{ type: "text", text: [
+              "## Decisions",
+              "- [decision] Consolidated decision 1",
+              "- [decision] Consolidated decision 2",
+              "- [decision] Consolidated decision 3",
+              "- [decision] Consolidated decision 4",
+              "- [decision] Consolidated decision 5",
+              "## Constraints",
+              "- [constraint] Consolidated constraint 1",
+              "- [constraint] Consolidated constraint 2",
+              "- [constraint] Consolidated constraint 3",
+              "## Gotchas",
+              "- [gotcha] Consolidated gotcha 1",
+              "- [gotcha] Consolidated gotcha 2",
+              "- [gotcha] Consolidated gotcha 3",
+            ].join("\n") }] }],
           };
         }
         const msgs = [];
@@ -55,7 +70,7 @@ function toolCtx(sessionID) {
 function writeMemory(lines) {
   const dir = path.join(tmpProject, ".deep-memory");
   fs.mkdirSync(dir, { recursive: true });
-  const content = Array.from({ length: lines }, (_, i) => `Line ${i + 1}`).join("\n");
+  const content = Array.from({ length: lines }, (_, i) => `- [decision] Detailed decision entry ${i + 1} with sufficient context for validation`).join("\n");
   fs.writeFileSync(path.join(dir, "MEMORY.md"), content, "utf8");
 }
 
