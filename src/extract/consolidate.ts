@@ -80,6 +80,29 @@ export function validateConsolidation(
   return { ok: true };
 }
 
+/**
+ * Find a near-duplicate entry in existing MEMORY.md content (A-Mem G8 pattern).
+ * Compares the new line against every '- [' entry using SimHash similarity.
+ * Short lines (<50 chars) use a stricter threshold (0.98) to avoid false positives.
+ */
+export function findNearDuplicate(
+  newLine: string,
+  existingContent: string,
+): { existingLine: string; similarity: number } | null {
+  const newHash = simHash(newLine);
+  const lines = existingContent.split("\n");
+  for (const line of lines) {
+    if (!line.startsWith("- [")) continue;
+    const existingHash = simHash(line);
+    const sim = similarity(newHash, existingHash);
+    const threshold = newLine.length < 50 ? 0.98 : SIMILARITY_THRESHOLD;
+    if (sim >= threshold) {
+      return { existingLine: line, similarity: sim };
+    }
+  }
+  return null;
+}
+
 interface ConsolidateOpts {
   staleFilePaths?: string[];
 }
