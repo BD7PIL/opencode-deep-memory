@@ -268,6 +268,19 @@ async function handleIdleConsolidation(
   const typedClient = client as IdleClient;
   if (!typedClient?.session) return;
 
+  // CRITICAL GUARD: never run consolidation on a session this plugin spawned.
+  // The consolidation sub-session is created via client.session.create + promptAsync
+  // with agent:"general". When it finishes, OpenCode emits session.idle for it.
+  // Without this guard, the idle handler treats the sub-session like a normal one:
+  //   consumePendingConsolidation(subID) → undefined (pending is keyed by PARENT id)
+  //   shouldConsolidate() → true (MEMORY.md unchanged, counter unchanged)
+  //   → spawn grand-sub-session + toast → infinite cascade, one toast per generation.
+  // See markSubSessionSpawned() / isSpawnedSubSession() in shared-state.ts.
+  if (state.isSpawnedSubSession(sessionID)) {
+    logger.info("idle consolidation: skipping plugin-spawned sub-session", { sessionID });
+    return;
+  }
+
   const memPath = memoryFilePath("project", "memory", projectPath);
   if (!existsSyncSync(memPath)) return;
 
@@ -333,6 +346,7 @@ async function handleIdleConsolidation(
     });
 
     state.setPendingConsolidation(sessionID, { subSessionID: subID, memMtime: memStat.mtimeMs });
+    state.markSubSessionSpawned(subID);
     state.persistPendingConsolidation(projectPath);
     await showToast(typedClient, "▣ deep-memory | memory consolidation spawned (general)", "info", 3000);
     logger.info("idle consolidation: spawned", { subSessionID: subID, lines: memLines });

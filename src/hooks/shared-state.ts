@@ -118,10 +118,16 @@ export class PluginState {
   private _nudgedSessions = new Map<string, Set<string>>();
   private _pendingPostCompactNudges = new Set<string>();
   private _pendingConsolidation: Record<string, { subSessionID: string; memMtime: number }> = {};
+  /**
+   * IDs of sub-sessions this plugin spawned (consolidation / compression).
+   * Used to short-circuit hooks that must not run on our own spawned sub-sessions,
+   * which would otherwise cascade (sub-session idle → spawn grand-sub-session → ...).
+   * Restored from .pending-consolidation.json on startup so the guard survives restarts.
+   */
+  private _spawnedSubSessionIDs = new Set<string>();
 
   private _memoryStoreSinceConsolidation = 0;
   private _lastConsolidationMemLines = 0;
-
   agentOf(sessionID: string): string | undefined {
     return this._agents.get(sessionID);
   }
@@ -136,6 +142,22 @@ export class PluginState {
     this._lastUserText.delete(sessionID);
     this._lastNudgeMessageCount.delete(sessionID);
     this._lastMemoryNudgeMessageCount.delete(sessionID);
+    this._spawnedSubSessionIDs.delete(sessionID);
+  }
+
+  /**
+   * Mark a sub-session ID as plugin-spawned. Call at every spawn site (idle
+   * consolidation, compaction consolidation, context compression) right after
+   * `client.session.create` succeeds. Prevents the sub-session's own
+   * idle/compaction events from re-triggering the same spawn logic.
+   */
+  markSubSessionSpawned(subSessionID: string): void {
+    if (subSessionID) this._spawnedSubSessionIDs.add(subSessionID);
+  }
+
+  /** Returns true if this sessionID was created by the plugin itself. */
+  isSpawnedSubSession(sessionID: string): boolean {
+    return this._spawnedSubSessionIDs.has(sessionID);
   }
 
   recordModel(sessionID: string, model: { providerID: string; modelID: string }): void {
@@ -446,36 +468,61 @@ export class PluginState {
     return info;
   }
 
-  /** P0 (Grill #5): persist pending consolidation to survive restarts. */
+  /**
+   * P0 (Grill #5): persist ALL pending consolidations to survive restarts.
+   *
+   * Multi-entry format (v2):
+   *   { "version": 2, "entries": [{ sessionID, subSessionID, memMtime }, ...] }
+   * Previously only one entry was written (keys[0]) which silently lost
+   * concurrent pending consolidations from other parent sessions.
+   */
   persistPendingConsolidation(projectDir: string): void {
-    const keys = Object.keys(this._pendingConsolidation);
-    if (keys.length === 0) {
-      const filePath = path.join(projectDir, ".pending-consolidation.json");
+    const filePath = path.join(projectDir, ".pending-consolidation.json");
+    const entries = Object.entries(this._pendingConsolidation).map(
+      ([sid, info]) => ({ sessionID: sid, subSessionID: info.subSessionID, memMtime: info.memMtime }),
+    );
+    if (entries.length === 0) {
       try { fs.unlinkSync(filePath); } catch {}
       return;
     }
-    const sid = keys[0];
-    const info = this._pendingConsolidation[sid];
-    const filePath = path.join(projectDir, ".pending-consolidation.json");
     fs.mkdirSync(projectDir, { recursive: true });
-    fs.writeFileSync(
-      filePath,
-      JSON.stringify({ sessionID: sid, subSessionID: info.subSessionID, memMtime: info.memMtime }),
-      "utf8",
-    );
+    fs.writeFileSync(filePath, JSON.stringify({ version: 2, entries }), "utf8");
   }
 
-  /** P0 (Grill #5): restore pending consolidation from file. Returns true if restored. */
+  /**
+   * P0 (Grill #5): restore pending consolidation from file. Returns true if restored.
+   *
+   * Reads both the legacy single-entry format ({ sessionID, subSessionID, memMtime })
+   * and the v2 multi-entry format ({ version: 2, entries: [...] }). Also re-populates
+   * the spawned-sub-session Set so the idle guard survives process restarts
+   * (sub-sessions may still complete and emit session.idle after a restart).
+   */
   restorePendingConsolidation(projectDir: string): boolean {
     const filePath = path.join(projectDir, ".pending-consolidation.json");
     try {
       const raw = fs.readFileSync(filePath, "utf8");
-      const parsed = JSON.parse(raw) as { sessionID: string; subSessionID: string; memMtime: number };
-      if (parsed.sessionID && parsed.subSessionID) {
-        this._pendingConsolidation[parsed.sessionID] = { subSessionID: parsed.subSessionID, memMtime: parsed.memMtime };
-        return true;
+      const parsed = JSON.parse(raw) as
+        | { version?: number; entries?: Array<{ sessionID: string; subSessionID: string; memMtime: number }> }
+        | { sessionID?: string; subSessionID?: string; memMtime?: number };
+      let entries: Array<{ sessionID: string; subSessionID: string; memMtime: number }>;
+      if ("entries" in parsed && Array.isArray(parsed.entries)) {
+        entries = parsed.entries;
+      } else if ("sessionID" in parsed && parsed.sessionID && parsed.subSessionID) {
+        // Legacy single-entry format — backward compat for older plugin versions.
+        entries = [{ sessionID: parsed.sessionID, subSessionID: parsed.subSessionID, memMtime: parsed.memMtime ?? 0 }];
+      } else {
+        return false;
       }
-      return false;
+      if (entries.length === 0) return false;
+      for (const e of entries) {
+        if (e.sessionID && e.subSessionID) {
+          this._pendingConsolidation[e.sessionID] = { subSessionID: e.subSessionID, memMtime: e.memMtime };
+          // Re-populate guard Set so post-restart idle events from these
+          // sub-sessions don't cascade.
+          this._spawnedSubSessionIDs.add(e.subSessionID);
+        }
+      }
+      return true;
     } catch {
       return false;
     }

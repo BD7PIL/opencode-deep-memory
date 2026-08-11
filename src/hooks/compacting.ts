@@ -208,8 +208,10 @@ export function createCompactingHandler(
 
       state.persistPendingConsolidation(projectPath);
 
-      // Step 4c: If MEMORY.md is large enough, start new LLM consolidation sub-session
-      if (!pendingConsolidation) {
+      // Step 4c: If MEMORY.md is large enough, start new LLM consolidation sub-session.
+      // Guard: skip if THIS session was itself plugin-spawned (e.g. we are compacting inside
+      // an idle consolidation sub-session). Same root-cause guard as src/index.ts idle handler.
+      if (!pendingConsolidation && !state.isSpawnedSubSession(sessionID)) {
         try {
           const memPath = memoryFilePath("project", "memory", projectPath);
           if (existsSync(memPath)) {
@@ -230,6 +232,7 @@ export function createCompactingHandler(
                   });
                   const memStat = (await import("node:fs")).statSync(memPath);
                   state.setPendingConsolidation(sessionID, { subSessionID: subID, memMtime: memStat.mtimeMs });
+                  state.markSubSessionSpawned(subID);
                   state.persistPendingConsolidation(projectPath);
                   logger?.info("compacting: spawned LLM consolidation sub-session", {
                     subSessionID: subID, lines: lineCount,

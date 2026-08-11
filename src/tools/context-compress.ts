@@ -99,6 +99,7 @@ export function createContextCompressTool(state: PluginState, client: unknown, p
         return { title: "Error", output: "Failed to prompt compression subagent." };
       }
 
+      state.markSubSessionSpawned(subID);
       state.requestContentAwareCompression({
         keepRecent: keep,
         summary: "",
