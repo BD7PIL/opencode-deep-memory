@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { consolidateMemory, validateConsolidation, buildConsolidationPrompt } from "../../src/extract/consolidate.js";
+import { consolidateMemory, validateConsolidation, buildConsolidationPrompt, findNearDuplicate } from "../../src/extract/consolidate.js";
 
 describe("consolidateMemory (Layer 5 synchronous)", () => {
   it("removes exact duplicate entries", () => {
@@ -241,5 +241,55 @@ describe("buildConsolidationPrompt (v0.11.4 community-sourced rules)", () => {
     const large = buildConsolidationPrompt("x".repeat(1000), { lines: 100, bytes: 1000 });
     expect(small).toContain("8");   // 10 * 0.8 = 8
     expect(large).toContain("80"); // 100 * 0.8 = 80
+  });
+});
+
+// ============================================================
+// findNearDuplicate: A-Mem G8 write-time dedup helper
+// ============================================================
+
+describe("findNearDuplicate (A-Mem G8 write-time dedup)", () => {
+  it("detects exact duplicate", () => {
+    const existing = "## Decisions\n- [decision] Use vitest for testing. [2026-08-12]\n";
+    const newLine = "- [decision] Use vitest for testing. [2026-08-12]";
+    const dup = findNearDuplicate(newLine, existing);
+    expect(dup).not.toBeNull();
+    expect(dup!.similarity).toBeGreaterThan(0.9);
+  });
+
+  it("detects near-duplicate (high similarity)", () => {
+    const existing = "- [decision] Use vitest for testing the project always everywhere. [2026-08-12]";
+    const newLine = "- [decision] Use vitest for testing the project always everywhere now. [2026-08-12]";
+    const dup = findNearDuplicate(newLine, existing);
+    expect(dup).not.toBeNull();
+  });
+
+  it("returns null for completely different entries", () => {
+    const existing = "- [decision] Use PostgreSQL for persistence. [2026-08-12]";
+    const newLine = "- [gotcha] npm install fails on RHEL7. [2026-08-12]";
+    const dup = findNearDuplicate(newLine, existing);
+    expect(dup).toBeNull();
+  });
+
+  it("returns null for empty existing content", () => {
+    const dup = findNearDuplicate("- [fact] new entry", "");
+    expect(dup).toBeNull();
+  });
+
+  it("uses stricter threshold (0.98) for short lines to avoid false positives", () => {
+    // Short entries with different subjects — SimHash should distinguish them
+    // Only the decision type + date are shared; subjects are different words
+    const existing = "- [decision] Deploy with Docker Compose [2026-08-12]";
+       const newLine = "- [decision] Migrate from Jest to Vitest [2026-08-12]";
+    const dup = findNearDuplicate(newLine, existing);
+    expect(dup).toBeNull();
+  });
+
+  it("only compares lines starting with '- ['", () => {
+    const existing = "## Decisions\nSome random text\n- [decision] real entry [2026-08-12]";
+    const newLine = "- [decision] real entry [2026-08-12]";
+    const dup = findNearDuplicate(newLine, existing);
+    expect(dup).not.toBeNull();
+    expect(dup!.existingLine).toContain("real entry");
   });
 });

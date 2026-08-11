@@ -44,6 +44,15 @@ Include:
 
 Be concise. Preserve file paths, function names, and error messages verbatim. Omit routine operations and failed attempts unless they contain lessons learned.
 
+## CADENCE GUIDANCE
+Compress most aggressively after closed subtasks (completed work blocks).
+Preserve detail for active/in-progress work — mid-iteration compression hurts.
+
+## PROCESS
+Think through what's important (your reasoning helps you produce a better summary),
+but output ONLY the summary itself. Do not include your reasoning in the output.
+
+
 Conversation to compress:
 ---
 ${conversation}

@@ -7,6 +7,7 @@ import fs from "node:fs";
 import nodePath from "node:path";
 import type { SearchService } from "../search/service.js";
 import { memoryFilePath } from "../shared/paths.js";
+import { findNearDuplicate } from "../extract/consolidate.js";
 
 const MEMORY_MAX_LINES = 200;
 const MEMORY_MAX_BYTES = 25_000;
@@ -62,6 +63,23 @@ export function createMemoryStoreTool(service: SearchService, state?: { incremen
       if (lines >= MEMORY_MAX_LINES || bytes >= MEMORY_MAX_BYTES) {
         await archiveEntry(memoryPath, `- ${contentWithDate}`);
         return `MEMORY.md at cap (${lines} lines/${bytes} bytes). Entry archived to MEMORY-archive.md. Use memory_search on MEMORY.md content; archived entries are available for manual review.`;
+      }
+
+      // G8 (A-Mem): write-time dedup — reject near-duplicate before storing
+      const existingContent = fs.existsSync(memoryPath)
+        ? await fs.promises.readFile(memoryPath, "utf8")
+        : "";
+      const newLine = `- ${contentWithDate}`;
+      const dup = findNearDuplicate(newLine, existingContent);
+      if (dup) {
+        return `Near-duplicate detected (similarity ${(dup.similarity * 100).toFixed(0)}%).\nExisting: "${dup.existingLine.slice(0, 100)}..."\nNot stored. Use memory_forget to remove the old entry first if it should be replaced.`;
+      }
+
+      // Claude Code pattern: warn at 90% cap
+      if (lines >= MEMORY_MAX_LINES * 0.9 || bytes >= MEMORY_MAX_BYTES * 0.9) {
+        await service.addEntry(args.scope, "memory", section, contentWithDate);
+        state?.incrementMemoryStoreCount();
+        return `WARNING: MEMORY.md at 90% cap (${lines}/${MEMORY_MAX_LINES} lines, ${bytes}/${MEMORY_MAX_BYTES} bytes).\nStored, but consolidation recommended soon. Run /checkpoint or wait for idle consolidation.`;
       }
 
       await service.addEntry(args.scope, "memory", section, contentWithDate);
