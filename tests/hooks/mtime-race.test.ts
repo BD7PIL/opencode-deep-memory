@@ -33,10 +33,18 @@ describe("P0: mtime race detection fix", () => {
     expect(after).toBeGreaterThan(before);
   });
 
-  it("Date.now() > stat mtimeMs is always true (the bug)", async () => {
-    // This demonstrates the original bug: Date.now() is always > any file mtime
+  it("Date.now() vs stat mtimeMs: integer vs float ms precision (the bug)", async () => {
+    // The original bug: code used `Date.now() < mtimeMs` as a "race detection"
+    // check, assuming Date.now() (integer ms) would always be > any recent file
+    // mtime. This assumption is FALSE: statSync().mtimeMs is float ms with
+    // sub-ms precision, so when a file is written in the same integer-ms
+    // window as Date.now(), mtimeMs can be GREATER than Date.now() despite
+    // the file being older. This made the buggy check spuriously fire.
+    // The fix is to compare mtimeMs values directly (see test below).
+    // Demonstrating the root cause deterministically (no timing dependence):
     const mtime = fs.statSync(memPath).mtimeMs;
-    expect(Date.now()).toBeGreaterThan(mtime);
+    expect(Number.isInteger(Date.now())).toBe(true);
+    expect(Number.isInteger(mtime)).toBe(false);
   });
 
   it("stat mtimeMs comparison is the correct check", async () => {
