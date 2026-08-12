@@ -47,6 +47,9 @@ export function createMemoryStoreTool(service: SearchService, state?: { incremen
         .describe("Memory scope (global or project)"),
     },
     async execute(args) {
+      // Defensive defaults: zod .default() may not apply in real opencode calls
+      const type = args.type ?? "note";
+      const scope = args.scope ?? "project";
       const sectionMap: Record<string, string> = {
         decision: "Decisions",
         constraint: "Constraints",
@@ -54,12 +57,12 @@ export function createMemoryStoreTool(service: SearchService, state?: { incremen
         fact: "Facts",
         note: "Notes",
       };
-      const section = sectionMap[args.type] ?? "Notes";
+      const section = sectionMap[type] ?? "Notes";
       const today = new Date().toISOString().slice(0, 10);
       const contentWithDate = `${args.content} [${today}]`;
 
       // D1: cap check before addEntry — overflow goes to archive only
-      const memoryPath = memoryFilePath(args.scope, "memory", service.project);
+      const memoryPath = memoryFilePath(scope, "memory", service.project);
       const { lines, bytes } = await checkOverflow(memoryPath);
       if (lines >= MEMORY_MAX_LINES || bytes >= MEMORY_MAX_BYTES) {
         await archiveEntry(memoryPath, `- ${contentWithDate}`);
@@ -78,12 +81,12 @@ export function createMemoryStoreTool(service: SearchService, state?: { incremen
 
       // Claude Code pattern: warn at 90% cap
       if (lines >= MEMORY_MAX_LINES * 0.9 || bytes >= MEMORY_MAX_BYTES * 0.9) {
-        await service.addEntry(args.scope, "memory", section, contentWithDate);
+        await service.addEntry(scope, "memory", section, contentWithDate);
         state?.incrementMemoryStoreCount();
         return `WARNING: MEMORY.md at 90% cap (${lines}/${MEMORY_MAX_LINES} lines, ${bytes}/${MEMORY_MAX_BYTES} bytes).\nStored, but consolidation recommended soon. Run /checkpoint or wait for idle consolidation.`;
       }
 
-await service.addEntry(args.scope, "memory", section, contentWithDate);
+      await service.addEntry(scope, "memory", section, contentWithDate);
       state?.incrementMemoryStoreCount();
 
       // G2 (Mem0): extract entities and write to sidecar for boosted search
@@ -102,7 +105,7 @@ await service.addEntry(args.scope, "memory", section, contentWithDate);
         // Entity sidecar is best-effort — don't fail the store
       }
 
-      return `Stored ${args.type} in ${args.scope} memory under ## ${section}`;
+      return `Stored ${type} in ${scope} memory under ## ${section}`;
     },
   });
 }

@@ -98,11 +98,22 @@ export function findNearDuplicate(
   const newHash = simHash(newLine);
   const lines = existingContent.split("\n");
   for (const line of lines) {
-    if (!line.startsWith("- [")) continue;
+    // Entry = any '- ' bullet line (matches real V5 format '- content'
+    // and legacy '- [type] content'). The old '- [' filter missed real entries.
+    if (!line.trim().startsWith("- ")) continue;
+    // Exact-match short-circuit: identical normalized text is always a duplicate
+    const normalizedNew = newLine.replace(/\s*\[\d{4}-\d{2}-\d{2}\]\s*$/, "").trim();
+    const normalizedExisting = line.replace(/\s*\[\d{4}-\d{2}-\d{2}\]\s*$/, "").trim();
+    if (normalizedNew === normalizedExisting) {
+      return { existingLine: line, similarity: 1 };
+    }
     const existingHash = simHash(line);
     const sim = similarity(newHash, existingHash);
-    const threshold = newLine.length < 50 ? 0.98 : SIMILARITY_THRESHOLD;
-    if (sim >= threshold) {
+    // Short lines (<50 chars): only exact-normalized match counts.
+    // SimHash is too sensitive on short text (e.g. 'test decision' vs
+    // 'test gotcha' differ in 1 token but hash close) → false positives.
+    // Long lines: SimHash fuzzy match with 0.92 threshold is fine.
+    if (newLine.length >= 50 && sim >= SIMILARITY_THRESHOLD) {
       return { existingLine: line, similarity: sim };
     }
   }
@@ -160,7 +171,10 @@ export function consolidateMemory(content: string, opts: ConsolidateOpts = {}): 
   const result: string[] = [];
 
   for (const line of lines) {
-    if (!line.startsWith("- [")) {
+    // Entry = any '- ' bullet line. Real MEMORY.md entries are stored as
+    // '- content' (V5 addEntry format) OR '- [type] content' (older format).
+    // The old '- [' filter silently skipped real entries, breaking dedup.
+    if (!line.trim().startsWith("- ")) {
       result.push(line);
       continue;
     }
