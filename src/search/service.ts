@@ -14,6 +14,7 @@ import type { Logger } from "../shared/log.js";
 import { BM25Index } from "./bm25.js";
 import { Reconciler } from "./reconcile.js";
 import { tokenizeQuery } from "./tokenizer.js";
+import { extractEntities, ENTITY_BOOST_WEIGHT } from "../shared/entity-extract.js";
 
 /** A search result with full context. */
 export interface SearchResult {
@@ -105,6 +106,24 @@ export class SearchService {
       limit: limit * 3, // Over-fetch for scope filtering
       applyDecay: opts?.applyDecay,
     });
+    // G2 (Mem0): entity-boosted re-ranking — results matching query entities get score boost
+    const queryEntities = extractEntities(query);
+    if (queryEntities.length > 0 && rawResults.length > 0) {
+      for (const raw of rawResults) {
+        // Extract entities from the result's matched terms + docId
+        const docText = raw.docId + " " + [...raw.matchedTerms].join(" ");
+        const docEntities = extractEntities(docText);
+        if (docEntities.length > 0) {
+          const docEntitySet = new Set(docEntities);
+          const hasOverlap = queryEntities.some((e) => docEntitySet.has(e));
+          if (hasOverlap) {
+            raw.score *= ENTITY_BOOST_WEIGHT;
+          }
+        }
+      }
+      // Re-sort after boost
+      rawResults.sort((a, b) => b.score - a.score);
+    }
 
     const results: SearchResult[] = [];
     for (const raw of rawResults) {

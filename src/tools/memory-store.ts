@@ -8,6 +8,7 @@ import nodePath from "node:path";
 import type { SearchService } from "../search/service.js";
 import { memoryFilePath } from "../shared/paths.js";
 import { findNearDuplicate } from "../extract/consolidate.js";
+import { extractEntities } from "../shared/entity-extract.js";
 
 const MEMORY_MAX_LINES = 200;
 const MEMORY_MAX_BYTES = 25_000;
@@ -82,8 +83,24 @@ export function createMemoryStoreTool(service: SearchService, state?: { incremen
         return `WARNING: MEMORY.md at 90% cap (${lines}/${MEMORY_MAX_LINES} lines, ${bytes}/${MEMORY_MAX_BYTES} bytes).\nStored, but consolidation recommended soon. Run /checkpoint or wait for idle consolidation.`;
       }
 
-      await service.addEntry(args.scope, "memory", section, contentWithDate);
+await service.addEntry(args.scope, "memory", section, contentWithDate);
       state?.incrementMemoryStoreCount();
+
+      // G2 (Mem0): extract entities and write to sidecar for boosted search
+      try {
+        const entities = extractEntities(args.content);
+        if (entities.length > 0) {
+          const sidecarPath = nodePath.join(nodePath.dirname(memoryPath), ".entities.json");
+          let existing: Array<{ section: string; entities: string[] }> = [];
+          if (fs.existsSync(sidecarPath)) {
+            existing = JSON.parse(fs.readFileSync(sidecarPath, "utf8"));
+          }
+          existing.push({ section, entities });
+          fs.writeFileSync(sidecarPath, JSON.stringify(existing), "utf8");
+        }
+      } catch {
+        // Entity sidecar is best-effort — don't fail the store
+      }
 
       return `Stored ${args.type} in ${args.scope} memory under ## ${section}`;
     },

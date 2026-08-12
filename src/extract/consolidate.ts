@@ -44,6 +44,12 @@ Step 1: For each entry, silently decide KEEP / MERGE / DELETE.
 Step 2: Output ONLY the consolidated MEMORY.md content. Do NOT output
         your reasoning or decisions list.
 
+## TOPIC OFFLOAD
+When an entry is too detailed (more than 3 lines), extract the detail to a
+topic file (topics/<descriptive-name>.md) and replace the entry with:
+  - [brief one-line summary] [topic:<descriptive-name>]
+The agent can read full detail via memory_topic("<descriptive-name>", "read").
+
 Current MEMORY.md:
 ---
 ${content}

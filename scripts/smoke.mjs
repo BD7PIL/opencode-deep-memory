@@ -62,7 +62,7 @@ async function main() {
   check("chat.params registered", typeof hooks["chat.params"] === "function");
   check("system.transform registered", typeof hooks["experimental.chat.system.transform"] === "function");
   check("messages.transform registered", typeof hooks["experimental.chat.messages.transform"] === "function");
-  check("tool has 6 tools (incl context_compress)", hooks.tool && Object.keys(hooks.tool).length === 6);
+  check("tool has 7 tools (incl context_compress + memory_topic)", hooks.tool && Object.keys(hooks.tool).length === 7);
 
   console.log();
   console.log("--- V4: system.transform (single frozen payload) ---");
