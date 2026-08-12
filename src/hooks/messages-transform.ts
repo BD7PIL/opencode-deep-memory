@@ -15,6 +15,7 @@ import type { Logger } from "../shared/log.js";
 import { runCompressionPipeline } from "../compress/index.js";
 import { extractTokensFromMessages } from "../compress/pressure.js";
 import { classifyForCompression } from "../compress/classifier.js";
+import { maybeProactiveExpand } from "../compress/proactive-expand.js";
 
 const NUDGE_THRESHOLD_TOKENS = 50_000;
 const NUDGE_EMERGENCY_TOKENS = 120_000;
@@ -78,6 +79,11 @@ export function createMessagesTransformHandler(
 ): NonNullable<Hooks["experimental.chat.messages.transform"]> {
   return async (input, output) => {
     const messages = output.messages;
+
+    // G9 (Headroom): proactive expansion — auto-restore compressed content
+    // that matches the user's latest query, before any compression runs.
+    await maybeProactiveExpand(state, messages as never);
+
     if (messages.length <= KEEP_RECENT) return;
 
     if (messages.length <= KEEP_RECENT + PROTECTED_HEAD) return;

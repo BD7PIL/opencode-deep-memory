@@ -130,6 +130,8 @@ export class PluginState {
   private _lastConsolidationMemLines = 0;
   private _lastConsolidationAttempt = 0;
   private static readonly CONSOLIDATION_COOLDOWN_MS = 60_000;
+  private _lastProactiveCheck = 0;
+  private static readonly PROACTIVE_THROTTLE_MS = 3_000;
   agentOf(sessionID: string): string | undefined {
     return this._agents.get(sessionID);
   }
@@ -298,6 +300,30 @@ export class PluginState {
 
   ccrGet(hash: string): CCRCacheEntry | undefined {
     return this._ccrCache.get(hash);
+  }
+
+  /**
+   * Iterate all non-expired CCR entries (for proactive expansion G9).
+   * Returns array sorted by createdAt descending (newest first).
+   */
+  ccrEntries(): CCRCacheEntry[] {
+    const now = Date.now();
+    const result: CCRCacheEntry[] = [];
+    for (const [, entry] of this._ccrCache) {
+      if (now - entry.createdAt > 300_000) continue; // skip expired (5min TTL)
+      result.push(entry);
+    }
+    result.sort((a, b) => b.createdAt - a.createdAt);
+    return result;
+  }
+
+  /** G9 proactive expansion throttle: at most one check per 3 seconds. */
+  canCheckProactiveExpansion(): boolean {
+    return Date.now() - this._lastProactiveCheck > PluginState.PROACTIVE_THROTTLE_MS;
+  }
+
+  recordProactiveCheck(): void {
+    this._lastProactiveCheck = Date.now();
   }
 
   recordInputTokens(tokens: number): void {
