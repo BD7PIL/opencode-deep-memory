@@ -17,3 +17,6 @@ FINAL-REPORT.md
 .gitignore
 docs/
 .deep-memory-debug.log
+.deep-memory/
+.omo/
+.opencode/

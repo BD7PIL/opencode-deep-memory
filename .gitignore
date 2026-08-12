@@ -8,4 +8,5 @@ coverage/
 .deep-memory-debug.log
 index-diagnostics.json
 docs/
-docs/
+.deep-memory/
+.omo/
