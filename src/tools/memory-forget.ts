@@ -24,9 +24,12 @@ export function createMemoryForgetTool(service: SearchService) {
         .describe("Must be true to actually delete; false shows matches"),
     },
     async execute(args) {
-      if (!args.confirm) {
+      // Defensive defaults: zod .default() may not apply in real opencode calls
+      const scope = args.scope ?? "project";
+      const confirm = args.confirm ?? false;
+      if (!confirm) {
         const results = await service.search(args.query, {
-          scope: args.scope,
+          scope,
           limit: 10,
         });
 
@@ -50,7 +53,7 @@ export function createMemoryForgetTool(service: SearchService) {
       }
 
       const result = await service.removeEntry(
-        args.scope === "all" ? "project" : args.scope,
+        scope === "all" ? "project" : scope,
         "memory",
         args.query,
       );

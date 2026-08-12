@@ -292,4 +292,45 @@ describe("findNearDuplicate (A-Mem G8 write-time dedup)", () => {
     expect(dup).not.toBeNull();
     expect(dup!.existingLine).toContain("real entry");
   });
+
+  it("REGRESSION: V5 format '- content' entries are detected (no '- [' filter)", () => {
+    const existing = "## Facts\nSome text\n- WLG5144 pin mapping uses 128 channels [2026-08-12]";
+    const newLine = "- WLG5144 pin mapping uses 128 channels [2026-08-12]";
+    const dup = findNearDuplicate(newLine, existing);
+    expect(dup).not.toBeNull();
+    expect(dup!.existingLine).toContain("WLG5144");
+  });
+
+  it("REGRESSION: long different entries are NOT duplicates (SimHash false-positive)", () => {
+    const existing = "- WLG5144 pin mapping: channel assignments for the device under test with specific naming conventions [2026-08-12]";
+    const newLine = "- UHC4T card spec: 128 channels with voltage force up to 4 volts and high power mode [2026-08-12]";
+    const dup = findNearDuplicate(newLine, existing);
+    expect(dup).toBeNull();
+  });
+
+  it("REGRESSION: unrelated long facts all store (no cross-false-positives)", () => {
+    const existing = [
+      "- WLG5144 pin mapping: channel assignments for the device under test [2026-08-12]",
+      "- UHC4T card spec: 128 channels with voltage force up to 4 volts [2026-08-12]",
+      "- DPS64 voltage range: minus 2.5 to plus 7 volts max 1 amp [2026-08-12]",
+      "- OpenShortPlus test flow: five signal groups all pass [2026-08-12]",
+    ].join("\n");
+    for (const newLine of [
+      "- SSF diagnostics tool: validates DSL syntax with zero errors [2026-08-12]",
+      "- generate_testtable creates standard 7-sheet ODS template [2026-08-12]",
+      "- scaffold.py checks target directory does not exist [2026-08-12]",
+      "- Continuity spec values must stay within bind-legal range [2026-08-12]",
+    ]) {
+      const dup = findNearDuplicate(newLine, existing);
+      expect(dup).toBeNull();
+    }
+  });
+
+  it("REGRESSION: real format exact duplicate rejected", () => {
+    const existing = "- npm install fails on RHEL7 use yarn instead [2026-08-12]\n- other entry [2026-08-12]";
+    const newLine = "- npm install fails on RHEL7 use yarn instead [2026-08-12]";
+    const dup = findNearDuplicate(newLine, existing);
+    expect(dup).not.toBeNull();
+    expect(dup!.similarity).toBe(1);
+  });
 });

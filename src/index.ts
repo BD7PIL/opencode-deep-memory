@@ -291,6 +291,9 @@ async function handleIdleConsolidation(
 
   const pending = state.consumePendingConsolidation(sessionID);
   if (pending) {
+    // Sync disk: consumed entry must be removed from persisted pending file.
+    // (Otherwise stale entries accumulate across restarts.)
+    state.persistPendingConsolidation(projectPath);
     const currentMtime = memStat.mtimeMs;
     if (currentMtime > pending.memMtime) {
       await showToast(typedClient, "▣ deep-memory | consolidation discarded (mtime race)", "warning");

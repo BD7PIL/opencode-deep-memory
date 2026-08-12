@@ -12,7 +12,7 @@ import { memoryFilePath } from "../shared/paths.js";
 
 export const TOOL_HINT =
   "Memory tools available: memory_search, memory_store, memory_forget, memory_topic.\n" +
-  "Memory tools available: memory_search, memory_store, memory_forget.\n" +
+  "Guidelines:\n" +
   "Guidelines:\n" +
   "  (1) BEFORE making ANY technical decision, search: memory_search(query=\"decision OR decided OR chose\", scope=\"project\")\n" +
   "  (2) BEFORE fixing an error, search for known pitfalls: memory_search(query=\"gotcha OR error OR bug\", scope=\"project\")\n" +
