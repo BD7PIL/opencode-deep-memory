@@ -13,7 +13,7 @@
 
 import type { Plugin, PluginInput, PluginModule, Hooks } from "@opencode-ai/plugin";
 
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile, mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
 
 import { createLogger, resolveDataRoot, acquireLock } from "./shared/index.js";
@@ -228,6 +228,7 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
     "experimental.chat.messages.transform": createMessagesTransformHandler(
       state,
       input.client,
+      projectPath,
       logger.for("messages-transform"),
     ),
   };
@@ -382,6 +383,27 @@ async function handleIdleConsolidation(
     logger.info("idle consolidation: spawned", { subSessionID: subID, lines: memLines });
   } catch (err) {
     logger.warn("idle consolidation: failed to spawn", { error: err instanceof Error ? err.message : String(err) });
+  }
+
+  // G5 cleanup: remove .tool-outputs/ files older than 7 days (best-effort)
+  try {
+    const toolOutputDir = path.join(projectMemoryDir(projectPath), ".tool-outputs");
+    if (existsSyncSync(toolOutputDir)) {
+      const entries = await readdir(toolOutputDir);
+      const now = Date.now();
+      let cleaned = 0;
+      for (const entry of entries) {
+        const filePath = path.join(toolOutputDir, entry);
+        const stat = await import("node:fs").then(m => m.statSync(filePath));
+        if (now - stat.mtimeMs > 7 * 24 * 60 * 60 * 1000) {
+          await import("node:fs/promises").then(m => m.unlink(filePath));
+          cleaned++;
+        }
+      }
+      if (cleaned > 0) logger.info("idle consolidation: cleaned old tool outputs", { cleaned });
+    }
+  } catch {
+    // Cleanup is best-effort
   }
 }
 

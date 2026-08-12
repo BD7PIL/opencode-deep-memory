@@ -44,6 +44,8 @@ export class SearchService {
   private readonly index: BM25Index;
   private readonly reconciler: Reconciler;
   private initialized = false;
+  private _searchCache = new Map<string, { results: SearchResult[]; mtime: number }>();
+  private static readonly SEARCH_CACHE_MAX = 50;
 
   constructor(opts: SearchServiceOptions) {
     this.dataRoot = opts.dataRoot;
@@ -90,6 +92,15 @@ export class SearchService {
 
     const scope = opts?.scope ?? "all";
     const limit = opts?.limit ?? 5;
+    const applyDecay = opts?.applyDecay ?? false;
+
+    // Cache check: keyed by query+scope+limit+applyDecay, invalidated by MEMORY.md mtime change
+    const memMtime = this.getSearchCacheMtime();
+    const cacheKey = `${query}::${scope}::${limit}::${applyDecay}`;
+    const cached = this._searchCache.get(cacheKey);
+    if (cached && cached.mtime === memMtime) {
+      return cached.results;
+    }
 
     const queryPhrases = tokenizeQuery(query);
     if (queryPhrases.length === 0) return [];
@@ -153,7 +164,33 @@ export class SearchService {
       if (results.length >= limit) break;
     }
 
+    // Cache write: store results with current mtime for future cache hits
+    if (this._searchCache.size >= SearchService.SEARCH_CACHE_MAX) {
+      const oldestKey = this._searchCache.keys().next().value;
+      if (oldestKey) this._searchCache.delete(oldestKey);
+    }
+    this._searchCache.set(cacheKey, { results, mtime: memMtime });
+
     return results;
+  }
+
+  /**
+   * Get the max mtime of project + global MEMORY.md for cache invalidation.
+   */
+  private getSearchCacheMtime(): number {
+    let mtime = 0;
+    try {
+      const { statSync } = require("node:fs");
+      const projPath = memoryFilePath("project", "memory", this.projectPath);
+      mtime = Math.max(mtime, statSync(projPath).mtimeMs);
+    } catch { /* file may not exist */ }
+    try {
+      const { statSync } = require("node:fs");
+      const { globalMemoryDir } = require("../shared/paths.js");
+      const globalPath = require("node:path").join(globalMemoryDir(), "MEMORY.md");
+      mtime = Math.max(mtime, statSync(globalPath).mtimeMs);
+    } catch { /* global may not exist */ }
+    return mtime;
   }
 
   /**
