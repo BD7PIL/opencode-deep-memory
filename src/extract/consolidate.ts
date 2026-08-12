@@ -95,26 +95,36 @@ export function findNearDuplicate(
   newLine: string,
   existingContent: string,
 ): { existingLine: string; similarity: number } | null {
-  const newHash = simHash(newLine);
   const lines = existingContent.split("\n");
   for (const line of lines) {
     // Entry = any '- ' bullet line (matches real V5 format '- content'
     // and legacy '- [type] content'). The old '- [' filter missed real entries.
     if (!line.trim().startsWith("- ")) continue;
+
     // Exact-match short-circuit: identical normalized text is always a duplicate
     const normalizedNew = newLine.replace(/\s*\[\d{4}-\d{2}-\d{2}\]\s*$/, "").trim();
     const normalizedExisting = line.replace(/\s*\[\d{4}-\d{2}-\d{2}\]\s*$/, "").trim();
     if (normalizedNew === normalizedExisting) {
       return { existingLine: line, similarity: 1 };
     }
-    const existingHash = simHash(line);
-    const sim = similarity(newHash, existingHash);
-    // Short lines (<50 chars): only exact-normalized match counts.
-    // SimHash is too sensitive on short text (e.g. 'test decision' vs
-    // 'test gotcha' differ in 1 token but hash close) → false positives.
-    // Long lines: SimHash fuzzy match with 0.92 threshold is fine.
-    if (newLine.length >= 50 && sim >= SIMILARITY_THRESHOLD) {
-      return { existingLine: line, similarity: sim };
+
+    // Token-set Jaccard matching: overlap of real content words.
+    // NOTE: SimHash fuzzy matching was REMOVED — 64-bit SimHash has severe
+    // false-positive issues on long text (completely different entries scored
+    // 0.83-0.94 similarity in real E2E, crossing the 0.92 threshold).
+    // Token Jaccard is the actual semantic overlap: different content gets
+    // low scores, near-identical content gets high scores.
+    const newTokens = new Set(tokenize(normalizedNew));
+    const existingTokens = new Set(tokenize(normalizedExisting));
+    if (newTokens.size > 0 && existingTokens.size > 0) {
+      let intersect = 0;
+      for (const t of newTokens) if (existingTokens.has(t)) intersect++;
+      const union = newTokens.size + existingTokens.size - intersect;
+      const jaccard = intersect / union;
+      // High threshold: only flag near-duplicates (90%+ token overlap)
+      if (jaccard >= 0.9) {
+        return { existingLine: line, similarity: jaccard };
+      }
     }
   }
   return null;
@@ -128,38 +138,6 @@ function tokenize(s: string): string[] {
   return s.toLowerCase().split(/[\s\-,.\[\](){}:]+/).filter((w) => w.length > 2);
 }
 
-function simHash(s: string, bits = 64): number {
-  const tokens = tokenize(s);
-  if (tokens.length === 0) return 0;
-  const v = new Int8Array(bits);
-  for (const token of tokens) {
-    let h = 0;
-    for (let i = 0; i < token.length; i++) {
-      h = ((h << 5) - h + token.charCodeAt(i)) | 0;
-    }
-    for (let i = 0; i < bits; i++) {
-      if ((h >> i) & 1) v[i]++; else v[i]--;
-    }
-  }
-  let hash = 0;
-  for (let i = 0; i < bits; i++) {
-    if (v[i] > 0) hash |= (1 << i);
-  }
-  return hash;
-}
-
-function hammingDistance(a: number, b: number): number {
-  let xor = a ^ b;
-  let dist = 0;
-  while (xor) { dist += xor & 1; xor >>>= 1; }
-  return dist;
-}
-
-function similarity(a: number, b: number, bits = 64): number {
-  return 1 - hammingDistance(a, b) / bits;
-}
-
-const SIMILARITY_THRESHOLD = 0.92;
 const STALE_BINDING_RE = /^(- \[[^\]]+\] )(src\/[^\s:]+:[^\s:]+)(?::[a-f0-9]+)?\s/;
 
 export function consolidateMemory(content: string, opts: ConsolidateOpts = {}): string {
@@ -167,7 +145,7 @@ export function consolidateMemory(content: string, opts: ConsolidateOpts = {}): 
 
   const lines = content.split("\n");
   const staleSet = new Set(opts.staleFilePaths ?? []);
-  const seen: { hash: number; line: string }[] = [];
+  const seen: { tokens: Set<string>; line: string }[] = [];
   const result: string[] = [];
 
   for (const line of lines) {
@@ -184,11 +162,20 @@ export function consolidateMemory(content: string, opts: ConsolidateOpts = {}): 
       if (m && staleSet.has(m[2])) continue;
     }
 
-    const hash = simHash(line);
-    const isDup = seen.some((s) => similarity(hash, s.hash) >= SIMILARITY_THRESHOLD);
+    const lineTokens = new Set(tokenize(line.replace(/\s*\[\d{4}-\d{2}-\d{2}\]\s*$/, "")));
+    // NOTE: SimHash fuzzy dedup removed — 64-bit SimHash false-positives on
+    // long text (different entries scored 0.83-0.94 in real E2E).
+    // Token Jaccard ≥ 0.9 = genuine near-duplicate.
+    const isDup = seen.some((s) => {
+      if (s.tokens.size === 0 || lineTokens.size === 0) return false;
+      let intersect = 0;
+      for (const t of lineTokens) if (s.tokens.has(t)) intersect++;
+      const union = s.tokens.size + lineTokens.size - intersect;
+      return intersect / union >= 0.9;
+    });
     if (isDup) continue;
 
-    seen.push({ hash, line });
+    seen.push({ tokens: lineTokens, line });
     result.push(line);
   }
 
