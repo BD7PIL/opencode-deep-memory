@@ -305,6 +305,22 @@ export function createCompactingHandler(
         `Prior conversation archived to ${checkpointPath}`,
       );
 
+      // G3 (Claude Code microCompact): re-inject recently read code files post-compact
+      // The agent loses file context after compaction — bridge the gap by injecting
+      // the last 5 read files (≤5K each) so work can continue without re-reading.
+      const recentFiles = tracker?.getRecentlyRead(5) ?? [];
+      for (const tracked of recentFiles) {
+        try {
+          const content = await readFile(tracked.path, "utf8");
+          const capped = content.length > 5000
+            ? content.slice(0, 5000) + `\n[... file truncated at 5K, full size ${content.length}]`
+            : content;
+          output.context.push(`[post-compact context: ${tracked.path}]\n${capped}`);
+        } catch {
+          // File may have been deleted or be inaccessible — skip silently
+        }
+      }
+
       logger?.info("compacting hook: checkpoint written", {
         sessionID,
         checkpointPath,

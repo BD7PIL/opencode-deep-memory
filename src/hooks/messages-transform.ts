@@ -73,6 +73,7 @@ function isSystemInjected(msg: { parts: unknown[] }): boolean {
 export function createMessagesTransformHandler(
   state: PluginState,
   client: unknown,
+  projectPath: string,
   logger?: Logger,
 ): NonNullable<Hooks["experimental.chat.messages.transform"]> {
   return async (input, output) => {
@@ -216,12 +217,36 @@ export function createMessagesTransformHandler(
           if (decision === "transient") {
             const lines = output.split("\n");
             if (lines.length < 20) continue;
-            const capped = lines.slice(0, 10).join("\n") +
-              `\n[... ${lines.length - 20} lines compressed — call deep_expand to restore ...]\n` +
-              lines.slice(-10).join("\n");
-            const { ccrStore, ccrInjectMarker } = await import("../compress/ccr.js");
-            const hash = ccrStore(state, output, capped, toolName);
-            toolState["output"] = ccrInjectMarker(capped, hash);
+
+            // G5 (Cursor dynamic-context-discovery): write full output to file,
+            // leave searchable pointer inline. Dual recovery: deep_expand(hash) or read(filePath).
+            try {
+              const { projectMemoryDir } = await import("../shared/paths.js");
+              const { createHash } = await import("node:crypto");
+              const { mkdir, writeFile } = await import("node:fs/promises");
+              const { join } = await import("node:path");
+              const outputDir = join(projectMemoryDir(projectPath), ".tool-outputs");
+              await mkdir(outputDir, { recursive: true });
+              const outputHash = createHash("sha256").update(output).digest("hex").slice(0, 12);
+              const outputFilePath = join(outputDir, `${toolName}-${outputHash}.txt`);
+              await writeFile(outputFilePath, output, "utf8");
+
+              const capped = lines.slice(0, 10).join("\n") +
+                `\n[... ${lines.length - 20} lines omitted. Full output: ${outputFilePath}\n` +
+                `Use read or grep on that path. deep_expand also available.]\n` +
+                lines.slice(-10).join("\n");
+              const { ccrStore, ccrInjectMarker } = await import("../compress/ccr.js");
+              const hash = ccrStore(state, output, capped, toolName);
+              toolState["output"] = ccrInjectMarker(capped, hash);
+            } catch {
+              // Fallback: if file write fails, use CCR-only compression (original behavior)
+              const capped = lines.slice(0, 10).join("\n") +
+                `\n[... ${lines.length - 20} lines compressed — call deep_expand to restore ...]\n` +
+                lines.slice(-10).join("\n");
+              const { ccrStore, ccrInjectMarker } = await import("../compress/ccr.js");
+              const hash = ccrStore(state, output, capped, toolName);
+              toolState["output"] = ccrInjectMarker(capped, hash);
+            }
             compressed++;
           } else if (decision === "stale") {
             toolState["output"] = "[OUTDATED — file was edited since this read. Use read to get current content.]";
