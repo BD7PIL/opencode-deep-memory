@@ -6,6 +6,7 @@ import { createMemoryStoreTool } from "./memory-store.js";
 import { createMemoryForgetTool } from "./memory-forget.js";
 import { createMemoryExpandTool } from "./memory-expand.js";
 import { createContextCompressTool } from "./context-compress.js";
+import { createMemoryTopicTool } from "./memory-topic.js";
 import { ccrRetrieve } from "../compress/ccr.js";
 
 export function createMemoryTools(
@@ -20,12 +21,14 @@ export function createMemoryTools(
     ? createMemoryExpandTool({ projectPath: opts.projectPath })
     : createMemoryExpandTool({ projectPath: "" });
   const compress = createContextCompressTool(state, opts?.client, opts?.projectPath ?? "");
+  const topic = createMemoryTopicTool(opts?.projectPath ?? "");
 
   return {
     memory_search: search,
     memory_store: store,
     memory_forget: forget,
     memory_expand: expand,
+    memory_topic: topic,
     context_compress: compress,
   };
 }

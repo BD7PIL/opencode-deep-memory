@@ -11,13 +11,15 @@ import type { Logger } from "../shared/log.js";
 import { memoryFilePath } from "../shared/paths.js";
 
 export const TOOL_HINT =
+  "Memory tools available: memory_search, memory_store, memory_forget, memory_topic.\n" +
   "Memory tools available: memory_search, memory_store, memory_forget.\n" +
   "Guidelines:\n" +
   "  (1) BEFORE making ANY technical decision, search: memory_search(query=\"decision OR decided OR chose\", scope=\"project\")\n" +
   "  (2) BEFORE fixing an error, search for known pitfalls: memory_search(query=\"gotcha OR error OR bug\", scope=\"project\")\n" +
   "  (3) AFTER fixing an error, store it: memory_store(type=\"gotcha\", content=\"[error]: ... → [fix]: ...\", scope=\"project\")\n" +
   "  (4) WHEN user states a constraint/rule, store it: memory_store(type=\"constraint\", content=\"...\", scope=\"project\")\n" +
-  "  (5) WHEN a technical decision is made, store it: memory_store(type=\"decision\", content=\"[decision]: ... → [reason]: ...\", scope=\"project\")";
+  "  (5) WHEN a technical decision is made, store it: memory_store(type=\"decision\", content=\"[decision]: ... → [reason]: ...\", scope=\"project\")\n" +
+  "  (6) Use memory_topic(name=\"topic-name\", action=\"read\") to read [topic:xxx] detail files referenced in MEMORY.md";
 
 export interface ComposeSystemPayloadOpts {
   state: PluginState;

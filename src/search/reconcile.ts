@@ -207,7 +207,17 @@ export class Reconciler {
     }
 
     if (!existsSync(dir)) return [];
-    return this.walkMarkdown(dir, scope);
+    const files = await this.walkMarkdown(dir, scope);
+
+    // Also scan topics/ subdirectory for topic detail files (G1 Claude Code pattern)
+    const topicsDir = path.join(dir, "topics");
+    if (existsSync(topicsDir)) {
+      const topicFiles = await this.walkMarkdown(topicsDir, scope);
+      for (const tf of topicFiles) {
+        files.push(tf);
+      }
+    }
+    return files;
   }
 
   /**
