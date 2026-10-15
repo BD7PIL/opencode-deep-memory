@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { acquireLock, tryAcquireLock } from "../../src/shared/lock.js";
+import { acquireLock } from "../../src/shared/lock.js";
 
 describe("acquireLock", () => {
   let tmpDir: string;
@@ -71,49 +71,5 @@ describe("acquireLock", () => {
     const release = await acquireLock(targetFile, { maxWaitMs: 1000 });
     release();
     expect(() => release()).not.toThrow();
-  });
-});
-
-describe("tryAcquireLock (synchronous)", () => {
-  let tmpDir: string;
-  let targetFile: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dm-lock-try-"));
-    targetFile = path.join(tmpDir, "MEMORY.md");
-  });
-
-  afterEach(() => {
-    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-  });
-
-  it("acquires lock on first try (no competition)", () => {
-    const release = tryAcquireLock(targetFile);
-    expect(release).not.toBeNull();
-    expect(typeof release).toBe("function");
-    if (release) release();
-  });
-
-  it("returns null when lock is held by a live process", () => {
-    // Write a live-process lock
-    fs.writeFileSync(
-      targetFile + ".lock",
-      JSON.stringify({ pid: process.pid, time: Date.now() }),
-      "utf8",
-    );
-    const release = tryAcquireLock(targetFile);
-    expect(release).toBeNull();
-  });
-
-  it("claims stale lock", () => {
-    // Write a stale lock
-    fs.writeFileSync(
-      targetFile + ".lock",
-      JSON.stringify({ pid: process.pid, time: Date.now() - 60_000 }),
-      "utf8",
-    );
-    const release = tryAcquireLock(targetFile, { ttlMs: 30_000 });
-    expect(release).not.toBeNull();
-    if (release) release();
   });
 });

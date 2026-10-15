@@ -7,20 +7,14 @@ import os from "node:os";
 import path from "node:path";
 import { createCompactingHandler } from "../../src/hooks/compacting.js";
 import { createPluginState } from "../../src/hooks/shared-state.js";
+import { mockHostClient } from "../helpers/mock-host.js";
 
 function tmpProject(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "dm-compacting-test-"));
 }
 
-function mockClient(messages: Array<{ info: unknown; parts: unknown[] }>) {
-  return {
-    session: {
-      messages: vi.fn().mockResolvedValue({ data: messages }),
-      create: vi.fn().mockResolvedValue({ data: { id: "mock-sub" } }),
-      promptAsync: vi.fn().mockResolvedValue(undefined),
-    },
-  };
-}
+const mockClient = (messages: Array<{ info: unknown; parts: unknown[] }>) =>
+  mockHostClient({ messages: messages as never });
 
 describe("createCompactingHandler", () => {
   let projectPath: string;

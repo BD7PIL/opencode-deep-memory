@@ -6,8 +6,6 @@
  * MUST NOT throw — any error is caught and logged.
  *
  * Pipeline: capture messages → extract heuristics → render + write checkpoint.md
- *
- * See DESIGN.md §5.1, §5.2 (Instant Layer), §7.1 (compacting row).
  */
 
 import type { Logger } from "../shared/log.js";

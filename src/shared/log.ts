@@ -99,20 +99,3 @@ export function createLogger(env: NodeJS.ProcessEnv = process.env): Logger {
 
   return make("deep-memory");
 }
-
-/** Dump a hook's input/output to the trace directory for post-mortem analysis. */
-export function dumpTrace(
-  logger: Logger,
-  hookName: string,
-  payload: { input?: unknown; output?: unknown },
-): void {
-  const dir = logger.traceDir();
-  if (!dir) return;
-  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const file = path.join(dir, `${hookName}-${stamp}.json`);
-  try {
-    fs.writeFileSync(file, JSON.stringify(payload, null, 2), "utf8");
-  } catch {
-    /* swallow */
-  }
-}

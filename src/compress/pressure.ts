@@ -1,5 +1,7 @@
 export type PressureLevel = "low" | "medium" | "high";
 
+import { estimateTokens } from "../shared/tokens.js";
+
 export interface PressureInfo {
   level: PressureLevel;
   ratio: number;
@@ -38,18 +40,7 @@ export function maxContextFrom(modelContextWindow: number): number {
   return FALLBACK_MAX_CONTEXT;
 }
 
-export function estimateTokens(text: string): number {
-  let cjk = 0;
-  let other = 0;
-  for (const ch of text) {
-    if (/[\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff00-\uffef\u3040-\u309f\u30a0-\u30ff]/.test(ch)) {
-      cjk++;
-    } else {
-      other++;
-    }
-  }
-  return Math.ceil(cjk * 0.7 + other / 3.8);
-}
+export { estimateTokens };
 
 export function extractTokensFromMessages(messages: Array<{ info: { role: string }; parts: unknown[] }>): number {
   let total = 0;

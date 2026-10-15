@@ -7,38 +7,23 @@
  * overriding the agent's model routing. This test verifies the model is actually
  * forwarded to the SDK call.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createCompactingHandler } from "../../src/hooks/compacting.js";
 import { createPluginState } from "../../src/hooks/shared-state.js";
+import { mockHostClient, makeMessages } from "../helpers/mock-host.js";
 
 function tmpProject(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "dm-model-override-"));
 }
 
-function mockClient(messages: Array<{ info: unknown; parts: unknown[] }>) {
-  return {
-    session: {
-      messages: vi.fn().mockResolvedValue({ data: messages }),
-      create: vi.fn().mockResolvedValue({ data: { id: "mock-sub-model-test" } }),
-      promptAsync: vi.fn().mockResolvedValue(undefined),
-    },
-    tui: { showToast: vi.fn().mockResolvedValue(undefined) },
-  };
-}
-
-function makeMessages(count: number): Array<{ info: unknown; parts: unknown[] }> {
-  const msgs = [];
-  for (let i = 0; i < count; i++) {
-    msgs.push({
-      info: { id: `m${i}`, role: i % 2 === 0 ? "user" : "assistant", sessionID: "s1" },
-      parts: [{ type: "text", text: `Message ${i} content with enough text to be captured` }],
-    });
-  }
-  return msgs;
-}
+const mockClient = (messages: Array<{ info: unknown; parts: unknown[] }>) =>
+  mockHostClient({
+    messages: messages as never,
+    subSessionId: "mock-sub-model-test",
+  });
 
 describe("Model override in promptAsync (P0.5 fix)", () => {
   let projectPath: string;

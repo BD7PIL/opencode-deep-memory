@@ -2,7 +2,12 @@ import { describe, it, expect } from "vitest";
 import { BM25Index } from "../../src/search/bm25.js";
 import { tokenize } from "../../src/search/tokenizer.js";
 
-describe("BENCHMARK: BM25 Scale", () => {
+// Timing-assertion benchmarks don't belong in the regular suite (slow, and
+// the loose thresholds still flake on loaded CI machines). Run explicitly:
+//   BENCH=1 npx vitest run tests/benchmark
+const suite = describe.skipIf(!process.env.BENCH);
+
+suite("BENCHMARK: BM25 Scale", () => {
   for (const n of [100, 500, 1000, 2000, 5000]) {
     it(`${n} docs: rebuild + search p99`, () => {
       const idx = new BM25Index();
@@ -33,7 +38,7 @@ describe("BENCHMARK: BM25 Scale", () => {
   }
 });
 
-describe("BENCHMARK: Tokenizer Scale", () => {
+suite("BENCHMARK: Tokenizer Scale", () => {
   for (const n of [1, 10, 50, 100]) {
     it(`${n}KB text`, () => {
       const cjk = "权限管理系统".repeat(n * 10);

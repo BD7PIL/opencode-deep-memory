@@ -7,8 +7,8 @@
  *   - event: session.compacted → pressure calibration + audit log
  *   - tool: memory_search / memory_store / memory_forget / memory_expand / context_compress
  *
- * Storage: <data>/local-memory/{global,projects/<hash>}/...
- * See DESIGN.md for full architecture.
+ * Storage: <projectPath>/.deep-memory/ (project) + global root (cross-project);
+ * layout documented in src/shared/paths.ts.
  */
 
 import type { Plugin, PluginInput, PluginModule, Hooks } from "@opencode-ai/plugin";
@@ -30,8 +30,8 @@ import { createMessagesTransformHandler } from "./hooks/messages-transform.js";
 import { calibrateFromCompaction, getCalibratedMaxContext } from "./compress/pressure.js";
 import { RepoMapTracker } from "./repomap/tracker.js";
 import { getLanguage } from "./repomap/extractor.js";
-import { existsSync as existsSyncSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { existsSync as existsSyncSync, statSync } from "node:fs";
+import { readFile, unlink, writeFile } from "node:fs/promises";
 import { buildConsolidationPrompt, validateConsolidation } from "./extract/consolidate.js";
 
 export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
@@ -287,7 +287,7 @@ async function handleIdleConsolidation(
 
   const content = await readFile(memPath, "utf8");
   const memLines = content.split("\n").length;
-  const memStat = await import("node:fs").then(m => m.statSync(memPath));
+  const memStat = statSync(memPath);
 
   const pending = state.consumePendingConsolidation(sessionID);
   if (pending) {
@@ -397,9 +397,9 @@ async function handleIdleConsolidation(
       let cleaned = 0;
       for (const entry of entries) {
         const filePath = path.join(toolOutputDir, entry);
-        const stat = await import("node:fs").then(m => m.statSync(filePath));
+        const stat = statSync(filePath);
         if (now - stat.mtimeMs > 7 * 24 * 60 * 60 * 1000) {
-          await import("node:fs/promises").then(m => m.unlink(filePath));
+          await unlink(filePath);
           cleaned++;
         }
       }

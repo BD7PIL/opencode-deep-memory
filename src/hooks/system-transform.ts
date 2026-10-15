@@ -1,8 +1,8 @@
 /**
  * experimental.chat.system.transform hook handler.
  *
- * V4: Injects frozen TOOL_HINT + mtime-cached MEMORY.md only.
- * No volatile block, no BM25 search, no repomap. See DESIGN_V4.md.
+ * Injects frozen TOOL_HINT + mtime-cached MEMORY.md only.
+ * No volatile block, no BM25 search, no repomap.
  */
 
 import type { Hooks } from "@opencode-ai/plugin";

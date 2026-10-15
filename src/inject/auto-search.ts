@@ -1,7 +1,6 @@
 /**
  * D2: Synchronous auto-search whisper. Runs in-hook (system.transform).
  * Triggers when top-1 BM25 score >= 2.0 (absolute) AND top-20 percentile (relative).
- * See DESIGN_V4.md D2.
  */
 
 import type { SearchResult } from "../search/service.js";

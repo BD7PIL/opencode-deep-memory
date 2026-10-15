@@ -100,14 +100,6 @@ export function memoryFilePath(
   return path.join(dir, file);
 }
 
-/** Path for the project-scoped schedule file. */
-export function scheduleFilePath(
-  projectPath: string,
-  _legacyDataRoot?: string,
-): string {
-  return path.join(projectMemoryDir(projectPath), ".schedule.json");
-}
-
 /** Path for the project-scoped index state file (mtime map for reconcile diff). */
 export function indexStateFilePath(
   projectPath: string,
@@ -123,24 +115,4 @@ export function checkpointRawPath(
   _legacyDataRoot?: string,
 ): string {
   return path.join(projectMemoryDir(projectPath), "checkpoint.raw.json");
-}
-
-/** Per-session checkpoint directory. */
-export function sessionCheckpointDir(
-  projectPath: string,
-  sessionID: string,
-  _legacyDataRoot?: string,
-): string {
-  return path.join(projectMemoryDir(projectPath), "sessions", sessionID);
-}
-
-/**
- * @deprecated Kept for log/debug identification only — no longer used for path construction.
- * Returns a short stable identifier for a project path (useful in logs).
- */
-export function hashProject(absProjectPath: string): string {
-  // Lazy-load crypto only when actually needed
-  const { createHash } = require("node:crypto") as typeof import("node:crypto");
-  const normalized = path.resolve(absProjectPath);
-  return createHash("sha256").update(normalized).digest("hex").slice(0, 16);
 }

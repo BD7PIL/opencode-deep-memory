@@ -4,6 +4,22 @@
 
 V5.1 architecture: three-layer optimization — deterministic noise reduction, intelligent context compression (main-agent-triggered + subagent-executed), and increment-based memory consolidation. Built on research from 7 production coding agents, 30+ memory systems, and 5 academic papers.
 
+## opencode v2 support (0.15.0+)
+
+The plugin ships a **dual-form entry**: hosts on either plugin contract load it from the same package.
+
+| Host | Entry | Behavior |
+|---|---|---|
+| opencode 1.18.x (v1 `plugin` key) | default export | Full hook set: system.transform, messages.transform, compacting, event, tools |
+| opencode 2.x (v2 `plugins` key) | `{ id, setup }` | Setup-registers faces via `ctx.*.hook`; warm-cache + last-user-message injection (see below) |
+
+v2 differences worth knowing:
+
+- **Injection channel**: v2 does not await `context` hook handlers (async mutations are lost), and `system[]` mutations are unreliable. The v2 adapter therefore rides the **last user message** — the byte-stable memory block is appended as a `<deep-memory-context>` text part. Cache profile: one miss per rewritten message, stable prefix otherwise.
+- **Warm-cache handoff**: the async system-refresh result is persisted to `.deep-memory/.v2-warm-cache.json`, so the next turn (or a new session in the same project) applies it synchronously without re-running the async transform.
+- **Compaction**: bridged via `ctx.session.hook("compaction")` with the v1 `{context, prompt}` output mapping; checkpoint capture works unchanged.
+- **Diagnostics**: set `DEEP_MEMORY_DEBUG=1` and check `.deep-memory/` for the debug channel.
+
 ## Quick start
 
 ```jsonc
@@ -155,9 +171,12 @@ No background LLM sessions, no `client.session.promptAsync` fire-and-forget, no 
 ├── MEMORY-archive.md          overflow when cap is reached
 ├── MEMORY.bak.md              backup before LLM consolidation overwrite
 ├── checkpoint.md              last compaction extraction
+├── checkpoint.raw.json        raw message dump (memory_expand reads this)
 ├── .compaction-log.jsonl      compaction audit trail
 ├── .index-state.json          BM25 index mtime tracker
-└── .pending-consolidation.json   persistent LLM subagent state (survives restarts)
+├── .pending-consolidation.json   persistent LLM subagent state (survives restarts)
+├── .v2-warm-cache.json        v2 host: async refresh result handed to the next turn
+└── .tool-outputs/             captured tool outputs (offline noise reduction)
 ```
 
 ## Configuration

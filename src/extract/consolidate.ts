@@ -1,7 +1,6 @@
 /**
  * Layer 5: Synchronous consolidation. No background, no LLM.
  * SimHash dedup + stale-entry purge + LLM consolidation prompt. Runs in-hook.
- * See DESIGN_V4.md Layer 5.
  */
 
 export function buildConsolidationPrompt(

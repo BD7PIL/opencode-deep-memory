@@ -34,3 +34,8 @@ jobs:
 
       - name: Smoke test
         run: npm run smoke
+
+      # The v0.14.1 production-bug trio shipped through green unit tests —
+      # the real-E2E regression script is the gatekeeper and belongs in CI.
+      - name: Real-bug regression (v0.14.1 trio)
+        run: npm run e2e:real-bugs

@@ -24,7 +24,7 @@ export function createMemoryForgetTool(service: SearchService) {
         .describe("Must be true to actually delete; false shows matches"),
     },
     async execute(args) {
-      // Defensive defaults: zod .default() may not apply in real opencode calls
+      // Defensive defaults: schema .default() may not apply in real opencode calls
       const scope = args.scope ?? "project";
       const confirm = args.confirm ?? false;
       if (!confirm) {

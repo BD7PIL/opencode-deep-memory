@@ -4,6 +4,13 @@ import path from "node:path";
 import os from "node:os";
 import { SearchService } from "../../src/search/service.js";
 
+/** Push the file's mtime clearly past the previous write, so a same-clock-
+ *  tick rewrite can't fake "unchanged" at FS timestamp granularity. */
+function bumpMtime(filePath: string): void {
+  const future = new Date(Date.now() + 5_000);
+  fs.utimesSync(filePath, future, future);
+}
+
 describe("Search result cache (v0.13.0)", () => {
   let tmpProject: string;
   let tmpGlobal: string;
@@ -46,6 +53,7 @@ describe("Search result cache (v0.13.0)", () => {
 
     // Add a new entry via the service (triggers index update)
     await service.addEntry("project", "memory", "Decisions", "[decision] Use zod for runtime validation [2026-08-12]");
+    bumpMtime(path.join(tmpProject, ".deep-memory", "MEMORY.md"));
 
     // Search for the new entry — cache should be invalidated by addEntry's file change
     const results2 = await service.search("zod", { scope: "project", limit: 5 });

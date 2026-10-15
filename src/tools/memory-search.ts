@@ -29,7 +29,7 @@ export function createMemorySearchTool(service: SearchService) {
         .describe("Maximum number of results (1-20)"),
     },
     async execute(args) {
-      // Defensive defaults: zod .default() may not apply in real opencode calls
+      // Defensive defaults: schema .default() may not apply in real opencode calls
       const scope = args.scope ?? "all";
       const limit = args.limit ?? 5;
       const results = await service.search(args.query, {

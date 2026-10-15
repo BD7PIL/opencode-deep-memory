@@ -5,10 +5,10 @@
  */
 
 import fs from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { acquireLock } from "../shared/lock.js";
-import { memoryFilePath } from "../shared/paths.js";
+import { globalMemoryDir, memoryFilePath } from "../shared/paths.js";
 import type { Scope, MemoryType } from "../shared/paths.js";
 import type { Logger } from "../shared/log.js";
 import { BM25Index } from "./bm25.js";
@@ -102,6 +102,14 @@ export class SearchService {
       return cached.results;
     }
 
+    // On a cache miss the MEMORY.md mtime has moved — re-diff the index so
+    // content changes are actually picked up. The reconciler skips unchanged
+    // files by mtime, so the common case is one stat per file. (Without this,
+    // an addEntry whose post-write stat raced the attribute cache could leave
+    // the in-memory index stale forever — the query would never see the new
+    // entry even though the file on disk has it.)
+    await this.reconciler.sync();
+
     const queryPhrases = tokenizeQuery(query);
     if (queryPhrases.length === 0) return [];
 
@@ -180,14 +188,11 @@ export class SearchService {
   private getSearchCacheMtime(): number {
     let mtime = 0;
     try {
-      const { statSync } = require("node:fs");
       const projPath = memoryFilePath("project", "memory", this.projectPath);
       mtime = Math.max(mtime, statSync(projPath).mtimeMs);
     } catch { /* file may not exist */ }
     try {
-      const { statSync } = require("node:fs");
-      const { globalMemoryDir } = require("../shared/paths.js");
-      const globalPath = require("node:path").join(globalMemoryDir(), "MEMORY.md");
+      const globalPath = path.join(globalMemoryDir(), "MEMORY.md");
       mtime = Math.max(mtime, statSync(globalPath).mtimeMs);
     } catch { /* global may not exist */ }
     return mtime;

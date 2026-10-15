@@ -47,7 +47,7 @@ export function createMemoryStoreTool(service: SearchService, state?: { incremen
         .describe("Memory scope (global or project)"),
     },
     async execute(args) {
-      // Defensive defaults: zod .default() may not apply in real opencode calls
+      // Defensive defaults: schema .default() may not apply in real opencode calls
       const type = args.type ?? "note";
       const scope = args.scope ?? "project";
       const sectionMap: Record<string, string> = {

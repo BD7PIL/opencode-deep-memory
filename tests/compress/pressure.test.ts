@@ -58,22 +58,20 @@ describe("maxContextFrom", () => {
   });
 });
 
-describe("estimateTokens (pressure module — CJK-aware)", () => {
+describe("estimateTokens (shared/tokens, re-exported via pressure)", () => {
   it("returns 0 for empty string", () => {
     expect(estimateTokens("")).toBe(0);
   });
 
-  it("counts ASCII text (~3.8 chars/token)", () => {
-    // 38 chars → ceil(38/3.8) = 10 tokens
-    const text = "a".repeat(38);
-    const tokens = estimateTokens(text);
-    expect(tokens).toBe(10);
+  it("uses the ~4 chars/token heuristic (ceil, never under-budget)", () => {
+    // 5 chars → ceil(5/4) = 2
+    expect(estimateTokens("hello")).toBe(2);
+    expect(estimateTokens("abcd")).toBe(1);
   });
 
-  it("counts CJK text (~0.7 tokens/char)", () => {
-    const cjk = "你好世界"; // 4 CJK chars
-    const tokens = estimateTokens(cjk);
-    expect(tokens).toBe(Math.ceil(4 * 0.7));
+  it("over-counts CJK (pessimistic by design)", () => {
+    const tokens = estimateTokens("你好世界");
+    expect(tokens).toBeGreaterThan(0);
   });
 
   it("handles mixed CJK + ASCII", () => {

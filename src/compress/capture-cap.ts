@@ -1,6 +1,6 @@
 /**
- * D3: Capture-time size caps. Applied ONCE when a tool result first appears,
- * not post-hoc on subsequent turns. See DESIGN_V4.md D3.
+ * Capture-time size caps: applied ONCE when a tool result first appears,
+ * not post-hoc on subsequent turns.
  *
  * Values from Cline's production output-limits.ts.
  */

@@ -6,7 +6,7 @@
  * raw checkpoint dump that preserves the original message parts.
  */
 
-import { z } from "zod";
+import { tool } from "@opencode-ai/plugin";
 import { checkpointRawPath } from "../shared/paths.js";
 import fs from "node:fs";
 
@@ -14,11 +14,11 @@ export function createMemoryExpandTool(opts: { projectPath: string }) {
   return {
     description:
       "Expand compressed context — retrieve original content of a message that was stripped by the memory plugin's context compression. Use when you need to see the full reasoning, tool output, or text of an old message that was compressed.",
-    args: z.object({
-      messageID: z
-        .string()
-        .describe("The message ID to expand (visible in conversation history)"),
-    }).shape,
+    args: {
+      messageID: tool.schema.string().describe(
+        "The message ID to expand (visible in conversation history)",
+      ),
+    },
     execute: async (args: { messageID: string }): Promise<string> => {
       // 1. Find checkpoint.raw.json
       const rawPath = checkpointRawPath(opts.projectPath, ""); // sessionID not used in path

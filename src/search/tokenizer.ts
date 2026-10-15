@@ -1,7 +1,7 @@
 /**
  * CJK bigram + Latin word tokenizer.
  *
- * Algorithm (per DESIGN §4.1):
+ * Algorithm:
  * - Split input into CJK runs and non-CJK runs
  * - CJK run of length N → emit N unigrams + max(0, N-1) bigrams (sliding 2-char window)
  * - Non-CJK run → lowercase, split on [\s\p{P}]+, filter empties

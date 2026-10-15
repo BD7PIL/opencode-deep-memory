@@ -6,18 +6,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { captureMessages } from "../../src/extract/capture.js";
+import { mockHostClient } from "../helpers/mock-host.js";
 
 function tmpProject(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "dm-capture-test-"));
 }
 
-function mockClient(messages: Array<{ info: unknown; parts: unknown[] }>) {
-  return {
-    session: {
-      messages: vi.fn().mockResolvedValue({ data: messages }),
-    },
-  };
-}
+const mockClient = (messages: Array<{ info: unknown; parts: unknown[] }>) =>
+  mockHostClient({ messages: messages as never });
 
 describe("captureMessages", () => {
   let projectPath: string;

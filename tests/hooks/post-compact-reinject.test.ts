@@ -1,36 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createPluginState } from "../../src/hooks/shared-state.js";
 import { createCompactingHandler } from "../../src/hooks/compacting.js";
 import { RepoMapTracker } from "../../src/repomap/tracker.js";
+import { mockHostClient, makeMessages } from "../helpers/mock-host.js";
 
 function tmpProject(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "dm-postcompact-"));
 }
 
-function mockClient(messages: Array<{ info: unknown; parts: unknown[] }>) {
-  return {
-    session: {
-      messages: vi.fn().mockResolvedValue({ data: messages }),
-      create: vi.fn().mockResolvedValue({ data: { id: "mock-sub" } }),
-      promptAsync: vi.fn().mockResolvedValue(undefined),
-    },
-    tui: { showToast: vi.fn().mockResolvedValue(undefined) },
-  };
-}
-
-function makeMessages(count: number): Array<{ info: unknown; parts: unknown[] }> {
-  const msgs = [];
-  for (let i = 0; i < count; i++) {
-    msgs.push({
-      info: { id: `m${i}`, role: i % 2 === 0 ? "user" : "assistant", sessionID: "s1" },
-      parts: [{ type: "text", text: `Message ${i} content with enough text` }],
-    });
-  }
-  return msgs;
-}
+const mockClient = (messages: Array<{ info: unknown; parts: unknown[] }>) =>
+  mockHostClient({ messages: messages as never });
 
 describe("Post-compact file re-injection (G3 Claude Code)", () => {
   let projectPath: string;

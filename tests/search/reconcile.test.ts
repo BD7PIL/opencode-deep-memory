@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs/promises";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { BM25Index } from "../../src/search/bm25.js";
@@ -103,6 +103,9 @@ describe("Reconciler", () => {
     expect(index.size).toBe(1);
 
     writeFileSync(filePath, "## Decisions\n- Updated content\n## New Section\n- Brand new", "utf8");
+    // Explicit mtime bump: same-tick rewrites can't move mtime at FS granularity.
+    const future = new Date(Date.now() + 5_000);
+    utimesSync(filePath, future, future);
 
     const result = await reconciler.sync();
     expect(result.modified).toBe(1);

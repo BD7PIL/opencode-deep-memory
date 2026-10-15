@@ -2,7 +2,7 @@
  * V4: Compose the system prompt payload — frozen TOOL_HINT + mtime-cached MEMORY.md.
  *
  * The payload is byte-stable across turns (unless MEMORY.md changes),
- * because 95%+ of turns hit the mtime cache. See DESIGN_V4.md D5.
+ * because 95%+ of turns hit the mtime cache.
  */
 
 import fs from "node:fs";

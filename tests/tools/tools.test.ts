@@ -182,7 +182,7 @@ describe("memory_forget tool", () => {
 });
 
 describe("createMemoryTools", () => {
-  it("returns all five tools including context_compress", () => {
+  it("returns all six tools including memory_topic and context_compress", () => {
     const service = mockSearchService();
     const state = createPluginState();
     const tools = createMemoryTools(service, state);
@@ -190,6 +190,7 @@ describe("createMemoryTools", () => {
     expect(tools.memory_store).toBeDefined();
     expect(tools.memory_forget).toBeDefined();
     expect(tools.memory_expand).toBeDefined();
+    expect(tools.memory_topic).toBeDefined();
     expect(tools.context_compress).toBeDefined();
   });
 

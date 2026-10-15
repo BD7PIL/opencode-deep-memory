@@ -6,11 +6,8 @@ import {
   globalMemoryDir,
   scopeDir,
   memoryFilePath,
-  scheduleFilePath,
   indexStateFilePath,
   checkpointRawPath,
-  sessionCheckpointDir,
-  hashProject,
 } from "../../src/shared/paths.js";
 
 describe("paths: projectSubdir", () => {
@@ -98,38 +95,12 @@ describe("paths: memoryFilePath", () => {
   });
 });
 
-describe("paths: scheduleFilePath / indexStateFilePath / checkpointRawPath", () => {
-  it("scheduleFilePath joins project dir", () => {
-    expect(scheduleFilePath("/proj")).toContain(".schedule.json");
-  });
-
+describe("paths: indexStateFilePath / checkpointRawPath", () => {
   it("indexStateFilePath joins project dir", () => {
     expect(indexStateFilePath("/proj")).toContain(".index-state.json");
   });
 
   it("checkpointRawPath joins project dir", () => {
     expect(checkpointRawPath("/proj", "sess")).toContain("checkpoint.raw.json");
-  });
-});
-
-describe("paths: sessionCheckpointDir", () => {
-  it("returns per-session directory", () => {
-    const dir = sessionCheckpointDir("/proj", "sess-1");
-    expect(dir).toContain("sessions");
-    expect(dir).toContain("sess-1");
-  });
-});
-
-describe("paths: hashProject", () => {
-  it("returns a 16-char hex string", () => {
-    expect(hashProject("/some/path")).toMatch(/^[a-f0-9]{16}$/);
-  });
-
-  it("is deterministic for same input", () => {
-    expect(hashProject("/some/path")).toBe(hashProject("/some/path"));
-  });
-
-  it("differs for different inputs", () => {
-    expect(hashProject("/path/a")).not.toBe(hashProject("/path/b"));
   });
 });

@@ -46,11 +46,6 @@ function readLock(lockFile: string): LockInfo | undefined {
   }
 }
 
-function writeLock(lockFile: string, info: LockInfo): void {
-  fs.mkdirSync(path.dirname(lockFile), { recursive: true });
-  fs.writeFileSync(lockFile, JSON.stringify(info), "utf8");
-}
-
 function isProcessAlive(pid: number): boolean {
   try {
     // signal 0 = existence check
@@ -128,29 +123,6 @@ export async function acquireLock(
     }
     await sleep(pollMs);
   }
-}
-
-/** Synchronous variant — tries once, does not wait. Returns release fn or null. */
-export function tryAcquireLock(
-  targetFile: string,
-  opts: Pick<LockOptions, "ttlMs"> = {},
-): (() => void) | null {
-  const ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
-  const lockFile = lockPath(targetFile);
-  const existing = readLock(lockFile);
-  if (existing && !isStale(existing, ttlMs)) return null;
-  writeLock(lockFile, { pid: process.pid, time: Date.now() });
-  const confirmed = readLock(lockFile);
-  if (confirmed && confirmed.pid === process.pid) {
-    return () => {
-      try {
-        fs.unlinkSync(lockFile);
-      } catch {
-        /* already gone */
-      }
-    };
-  }
-  return null;
 }
 
 function sleep(ms: number): Promise<void> {

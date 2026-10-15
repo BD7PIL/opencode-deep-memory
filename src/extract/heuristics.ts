@@ -2,7 +2,7 @@
  * Heuristic extraction — 5 pattern-matching extractors for checkpoint knowledge.
  *
  * No LLM calls. Pure regex + structural analysis on message parts.
- * Designed for the "instant layer" of dual-layer extraction (DESIGN.md §5.2).
+ * This is the "instant layer" of dual-layer extraction (LLM consolidation is the other).
  */
 
 import { truncateToTokenBudget } from "../shared/tokens.js";
