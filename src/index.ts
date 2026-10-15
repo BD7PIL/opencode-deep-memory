@@ -410,9 +410,16 @@ async function handleIdleConsolidation(
   }
 }
 
-const pluginModule: PluginModule = {
+const pluginModule: PluginModule & { setup?: typeof v2Setup } = {
   id: "opencode-deep-memory",
   server: deepMemoryPlugin,
+  setup: v2Setup,
 };
 
 export default pluginModule;
+
+// v2 re-exports (batch D2): dual-form entry — v1 hosts keep calling the
+// default (input) function; v2 hosts read .setup (E5-verified contract:
+// {id, setup} -> disposer). See src/v2/entry.ts for the adapter semantics.
+export { v2Setup, V2_PLUGIN_ID, buildV2Client } from "./v2/entry.js";
+import { v2Setup } from "./v2/entry.js";
