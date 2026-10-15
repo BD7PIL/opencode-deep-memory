@@ -45,3 +45,19 @@ hosts read `default.setup`).
   returns 2-item post-compact context.
 - 456 → 453 tests green (6 new cache invariants, 3 removed with the dead
   injector).
+
+## 0.15.0 addendum — real-E2E bug regression script (batch D2 item 3)
+
+`scripts/e2e-real-bugs.mjs` (also `npm run e2e:real-bugs`): the three v0.14.1
+real-production bugs as scripted scenarios against the built dist —
+1. memory_store with the exact real-call arg shape (no scope/type) stores
+   successfully (zod .default() does not run outside the TUI);
+2. write-time dedup catches exact duplicates of real '- content' entries and
+   does NOT false-positive on short token-similar lines (the removed SimHash
+   path);
+3. the idle-apply path persists pending-consolidation consumption to disk
+   (stale entries no longer resurrect across restarts) — asserted through the
+   real spawn → consume → persist flow with the project-root pending file.
+Driven through plugin hooks with mocked host clients (no opencode process
+needed); complements the unit regressions already in tests/extract and
+tests/hooks. 12 assertions, exit 1 on any failure.

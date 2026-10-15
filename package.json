@@ -24,7 +24,8 @@
     "smoke": "node scripts/smoke.mjs",
     "e2e": "node scripts/e2e.mjs",
     "verify": "npm run typecheck && npm test && npm run build && npm run smoke && npm run e2e",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "e2e:real-bugs": "node scripts/e2e-real-bugs.mjs"
   },
   "keywords": [
     "opencode",
