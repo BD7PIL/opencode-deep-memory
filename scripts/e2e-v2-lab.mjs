@@ -29,8 +29,11 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
+  copyFileSync,
+  chmodSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -51,6 +54,8 @@ function cliPackage() {
   if (platform === "linux" && arch === "arm64") return "@opencode/cli-linux-arm64";
   if (platform === "darwin" && arch === "arm64") return "@opencode/cli-darwin-arm64";
   if (platform === "darwin" && arch === "x64") return "@opencode/cli-darwin-x64";
+  if (platform === "win32" && arch === "x64") return "@opencode/cli-windows-x64";
+  if (platform === "win32" && arch === "arm64") return "@opencode/cli-windows-arm64";
   return undefined;
 }
 
@@ -230,16 +235,29 @@ function startStubLlm() {
 }
 
 function ensureEngine() {
-  const binary = join(LAB, "bin", "opencode");
+  const executable = process.platform === "win32" ? "opencode.exe" : "opencode";
+  const binary = join(LAB, "bin", executable);
   if (existsSync(binary)) return binary;
   const pkg = cliPackage();
   if (!pkg) throw new Error(`no opencode CLI package known for ${process.platform}/${process.arch}`);
   console.log(`  installing ${pkg}@${VERSION} (one-time, cached in ${LAB})`);
   mkdirSync(LAB, { recursive: true });
-  execFileSync("npm", ["pack", `${pkg}@${VERSION}`, "--silent"], { cwd: LAB, stdio: "inherit" });
-  const tarball = execFileSync("bash", ["-c", `ls ${LAB}/*.tgz | head -1`], { encoding: "utf8" }).trim();
-  execFileSync("tar", ["xzf", tarball, "-C", LAB]);
-  execFileSync("bash", ["-c", `mkdir -p ${LAB}/bin && cp ${LAB}/package/bin/opencode ${binary} && chmod +x ${binary}`]);
+  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  execFileSync(npm, ["pack", `${pkg}@${VERSION}`, "--silent"], {
+    cwd: LAB,
+    stdio: "inherit",
+    // Node 24 on Windows refuses to spawn .cmd files without a shell.
+    shell: process.platform === "win32",
+  });
+  const tarball = readdirSync(LAB).find((name) => name.endsWith(".tgz"));
+  if (!tarball) throw new Error(`npm pack produced no tarball in ${LAB}`);
+  // Git-for-Windows ships GNU tar, which reads "C:" as a remote host. Use the
+  // Windows bsdtar explicitly so absolute paths stay local.
+  const tar = process.platform === "win32" ? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe") : "tar";
+  execFileSync(tar, ["xzf", join(LAB, tarball), "-C", LAB]);
+  mkdirSync(join(LAB, "bin"), { recursive: true });
+  copyFileSync(join(LAB, "package", "bin", executable), binary);
+  chmodSync(binary, 0o755);
   const reported = execFileSync(binary, ["--version"], { encoding: "utf8" }).trim();
   console.log(`  engine: ${reported}`);
   return binary;
@@ -249,21 +267,16 @@ function writeLabConfig(directory) {
   const home = join(LAB, "home");
   const configDir = join(home, ".config", "opencode");
   mkdirSync(configDir, { recursive: true });
-  // A wrapper directory: the v2 host resolves a directory plugin to index.js,
-  // ignoring package.json main, so the thin re-export is what loads dist.
-  const wrapper = join(LAB, "plugin");
-  mkdirSync(wrapper, { recursive: true });
-  writeFileSync(join(wrapper, "package.json"), JSON.stringify({ name: "dm-e2e-wrapper", version: "0.0.0", type: "module", main: "index.js" }, null, 2));
-  writeFileSync(
-    join(wrapper, "index.js"),
-    `import mod from ${JSON.stringify(join(REPO, "dist", "index.js"))}\nexport default mod\n`,
-  );
+  // The v2 host resolves a directory plugin to index.js and never reads
+  // package.json, so the repo root must be loadable as-is — the same path an
+  // air-gapped directory install takes.
+  const pluginDir = REPO;
   writeFileSync(
     join(configDir, "opencode.json"),
     JSON.stringify(
       {
         $schema: "https://opencode.ai/config.json",
-        plugins: [wrapper],
+        plugins: [pluginDir],
         model: "e2estub/stub-model",
         small_model: "e2estub/stub-model",
         provider: {
@@ -349,17 +362,17 @@ async function main() {
       "- [gotcha]: v2 exposes no session.messages; message reads go through ctx.session.context [2026-10-20]",
       "",
       "## Constraints",
-      "- [constraint]: ProcessShell runs on a 25 kHz clock domain while the ADC samples asynchronously [2026-10-20]",
+      "- [constraint]: sample processor runs on a 25 kHz clock domain while the ADC samples asynchronously [2026-10-20]",
       "- [constraint]: provider breakpoint budget is four and manual hints spend from the same budget [2026-10-20]",
       "- [constraint]: a cache prefix matches from the start, so an early mutation costs everything after it [2026-10-20]",
       "",
       "## Facts",
       "- [fact]: pyright and jdtls are registered as language servers in the shared opencode config [2026-10-20]",
-      "- [fact]: the searxng MCP endpoint answers over the tailscale network at 192.168.96.11 [2026-10-20]",
-      "- [fact]: ocrc provisions a remote openchamber instance over ssh and relays its egress [2026-10-20]",
+      "- [fact]: the sample service answers over the loopback interface at 127.0.0.1 [2026-10-20]",
+      "- [fact]: a provisioning CLI installs a remote editor instance over ssh and relays its egress [2026-10-20]",
       "- [fact]: headroom is a transport-layer proxy, so it composes with a plugin-layer memory manager [2026-10-20]",
       "- [fact]: nine of the twenty-six v2 context faces are absent from the published authoring types [2026-10-20]",
-      "- [fact]: the WLG5144 pattern generator needs an explicit level set before fast adjustment [2026-10-20]",
+      "- [fact]: the DEVICE-42 pattern generator needs an explicit level set before fast adjustment [2026-10-20]",
       "- [fact]: idle consolidation fires at eight stored entries or at twenty accumulated lines [2026-10-20]",
       "- [fact]: measured steady-state prompt prefix reuse on the lab engine is 0.996 [2026-10-20]",
       "- [fact]: the compaction hook receives the full message list, so capture needs no client fetch [2026-10-20]",
@@ -691,7 +704,13 @@ async function main() {
     cleanup();
     if (!KEEP) {
       // Keep the downloaded engine (the expensive part) but drop per-run state.
-      rmSync(projectDir, { recursive: true, force: true });
+      // Windows may still hold handles right after the engine is killed; a
+      // leftover temp dir must not turn a green gate red.
+      try {
+        rmSync(projectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      } catch (error) {
+        console.warn(`  (cleanup skipped: ${error.code ?? error.message})`);
+      }
     }
   }
 

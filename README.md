@@ -60,6 +60,24 @@ v2 differences worth knowing:
 
 Memory lives at `.deep-memory/` in your project root.
 
+For opencode 2.x use the `plugins` array. A package name resolves through
+`main`; a directory resolves through `index.js`, which this package ships, so an
+air-gapped host can be given the unpacked tree:
+
+```jsonc
+// opencode.json (v2)
+{
+  "plugins": [
+    "@bd7pil/opencode-deep-memory", // package → main → dist/index.js
+    "/opt/deep-memory"              // directory → index.js → dist/index.js
+  ]
+}
+```
+
+`provision.json` at the package root states both forms, the
+`@opencode-ai/plugin` peer, and the post-install checks, so a provisioner can
+install this plugin without knowing anything about it.
+
 ## What it does
 
 | Capability | How |

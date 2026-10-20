@@ -15,7 +15,7 @@
  * agent to call `memory_search(...)`, `memory_store(...)` and friends; a
  * prefixed name would silently invalidate that guidance.
  */
-import { tool } from "@opencode-ai/plugin";
+import { tool } from "../shared/tool.js";
 import type { V2ToolEditor, V2ToolInfo } from "./v2-types.js";
 
 /** A v1 tool definition as this codebase builds it. */

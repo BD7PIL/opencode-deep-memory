@@ -1,4 +1,4 @@
-import { tool } from "@opencode-ai/plugin";
+import { tool } from "../shared/tool.js";
 import type { PluginState } from "../hooks/shared-state.js";
 import { buildCompressionPrompt } from "../compress/compression-prompt.js";
 

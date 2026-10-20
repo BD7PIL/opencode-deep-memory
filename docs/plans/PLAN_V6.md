@@ -431,7 +431,7 @@ const ENTITY_PATTERNS = [
   /\b[A-Za-z][a-zA-Z0-9_]*\.(?:ts|js|py|go|rs|java|md)\b/g,  // File names: consolidate.ts
   /\b[a-z_][a-zA-Z0-9_]*\(\)/g,                                // Function calls: buildPrompt()
   /\b\d+\.\d+\.\d+\b/g,                                        // Version numbers: 3.6.8
-  /\b[A-Z][a-zA-Z0-9_-]{2,}\b/g,                              // PascalCase: WLG5144, OpenShort
+  /\b[A-Z][a-zA-Z0-9_-]{2,}\b/g,                              // PascalCase: DEVICE-42, OpenShort
 ];
 
 export function extractEntities(text: string): string[] {
@@ -460,7 +460,7 @@ if (entities.length > 0) {
 Sidecar format: `.deep-memory/.entities.json`:
 ```json
 [
-  { "section": "Decisions", "entities": ["wlg5144", "consolidate.ts", "3.6.8"] }
+  { "section": "Decisions", "entities": ["device-42", "consolidate.ts", "3.6.8"] }
 ]
 ```
 

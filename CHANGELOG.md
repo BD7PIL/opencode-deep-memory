@@ -1,3 +1,38 @@
+# 0.16.3 — loadable as a directory, and a declaration a provisioner can read
+
+## Added
+
+- **Root `index.js`** (`export { default } from "./dist/index.js"`). opencode v2
+  resolves a **directory** plugin target to `<dir>/index.js` / `<dir>/server.*`
+  and never reads `package.json`; without this file a directory install needed a
+  hand-written wrapper. The v2 gate now points at the repository root itself and
+  passes 38/38, so both install shapes load the same code:
+  package name → `main`, directory → `index.js`.
+- **`provision.json`** — the install contract read by provisioning tools: package
+  or directory form, and the post-install checks. It contains no host-specific
+  paths beyond the conventional `~/.ocrc/components` fallback.
+- **No runtime peer dependency.** The only thing this package used from
+  `@opencode-ai/plugin` was the two-line `tool()` helper (`input => input`, with
+  `schema = zod`). It is now bundled locally (`src/shared/tool.ts` + zod), so a
+  directory install in an air-gapped host no longer fails with `Cannot find
+  package '@opencode-ai/plugin'`. The peer is no longer declared.
+
+## Fixed (release hygiene)
+
+- **Publish gate now runs the full suite** (`verify:release`: typecheck, build,
+  test, smoke, e2e, `e2e:real-bugs`, `e2e:v2`) instead of the subset that let the
+  0.14.1 trio ship green. The workflow also rejects a tag that does not match
+  `package.json`, and asserts the tarball contains `dist/index.js`, `index.js`
+  and `provision.json`.
+- **`e2e:v2` runs on Windows** (platform package mapping, `npm.cmd` spawn,
+  Windows `tar.exe`, best-effort cleanup), so the gate is reproducible on the
+  development machine and not only on CI.
+- **`docs/` is no longer gitignored** while being tracked; `.zcode/` is ignored.
+- **Scrubbed host/employer-specific fixtures** (private-network IPs, instrument
+  model names) from the v2 lab seeds, test fixtures and comments.
+
+---
+
 # 0.16.2 — the v2 gate now asserts the session.idle path
 
 The real-engine gate claimed to cover the idle path but did not: v2 emits no

@@ -9,8 +9,9 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   external: ["@opencode-ai/plugin", "@opencode-ai/sdk"],
-  // No noExternal needed: zero runtime deps.
-  // tsup will tree-shake and bundle our own src into a single ESM file.
+  // `tool` comes from src/shared/tool.ts; its only runtime dependency is zod,
+  // which is bundled here so a directory install needs no node_modules at all.
+  noExternal: ["zod"],
   banner: {
     js: "/* opencode-deep-memory — zero runtime dependencies */",
   },

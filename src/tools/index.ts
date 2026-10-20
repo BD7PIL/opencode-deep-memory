@@ -1,6 +1,6 @@
 import type { SearchService } from "../search/service.js";
 import type { PluginState } from "../hooks/shared-state.js";
-import { tool } from "@opencode-ai/plugin";
+import { tool } from "../shared/tool.js";
 import { createMemorySearchTool } from "./memory-search.js";
 import { createMemoryStoreTool } from "./memory-store.js";
 import { createMemoryForgetTool } from "./memory-forget.js";

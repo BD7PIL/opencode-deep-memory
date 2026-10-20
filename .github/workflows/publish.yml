@@ -25,8 +25,26 @@ jobs:
       - name: Upgrade npm (Trusted Publishing requires npm >= 11.5.1)
         run: npm install -g npm@latest
 
-      - name: Verify (typecheck + test + build + smoke)
-        run: npm run verify
+      - name: Check tag matches package version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          test "v$VERSION" = "$GITHUB_REF_NAME" || {
+            echo "tag $GITHUB_REF_NAME does not match package.json v$VERSION"
+            exit 1
+          }
+
+      - name: Verify (typecheck + build + test + smoke + e2e + v2 engine)
+        run: npm run verify:release
+
+      - name: Check the published tarball ships the directory entry
+        run: |
+          npm pack --dry-run --json > /tmp/pack.json
+          node -e "
+            const files = JSON.parse(require('fs').readFileSync('/tmp/pack.json'))[0].files.map(f => f.path);
+            for (const required of ['dist/index.js', 'index.js', 'provision.json']) {
+              if (!files.includes(required)) { console.error('missing ' + required); process.exit(1) }
+            }
+          "
 
       - name: Publish
         run: npm publish --provenance --access public

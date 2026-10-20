@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "name": "opencode-deep-memory",
+  "version": "0.16.3",
+  "license": "MIT",
+  "host": {
+    "node": ">=20",
+    "os": ["linux", "darwin", "win32"],
+    "arch": ["x64", "arm64"]
+  },
+  "enginePlugin": {
+    "spec": "@bd7pil/opencode-deep-memory@0.16.3",
+    "kind": "package",
+    "entry": "~/.ocrc/components/opencode-deep-memory/node_modules/@bd7pil/opencode-deep-memory",
+    "requiresPeer": []
+  },
+  "artifacts": [],
+  "configSync": [],
+  "verify": [
+    {
+      "kind": "file",
+      "path": "~/.ocrc/components/opencode-deep-memory/node_modules/@bd7pil/opencode-deep-memory/index.js",
+      "when": "directory"
+    },
+    { "kind": "engine-plugin-loaded", "spec": "@bd7pil/opencode-deep-memory" }
+  ]
+}

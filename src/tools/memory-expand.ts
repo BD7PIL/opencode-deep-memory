@@ -6,7 +6,7 @@
  * raw checkpoint dump that preserves the original message parts.
  */
 
-import { tool } from "@opencode-ai/plugin";
+import { tool } from "../shared/tool.js";
 import { checkpointRawPath } from "../shared/paths.js";
 import fs from "node:fs";
 

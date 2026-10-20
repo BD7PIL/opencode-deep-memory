@@ -2,7 +2,7 @@
  * memory_search tool — search persistent memory across sessions.
  */
 
-import { tool } from "@opencode-ai/plugin";
+import { tool } from "../shared/tool.js";
 import type { SearchService } from "../search/service.js";
 
 /**

@@ -5,7 +5,7 @@
  * The agent uses this tool to read the full detail on demand.
  * Topic files are indexed by BM25 just like MEMORY.md (Reconciler scans topics/).
  */
-import { tool } from "@opencode-ai/plugin";
+import { tool } from "../shared/tool.js";
 import { readFile, writeFile, readdir, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { projectMemoryDir } from "../shared/paths.js";

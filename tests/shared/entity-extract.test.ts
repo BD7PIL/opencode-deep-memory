@@ -20,9 +20,9 @@ describe("extractEntities (G2 Mem0 pattern)", () => {
   });
 
   it("extracts PascalCase identifiers", () => {
-    const entities = extractEntities("WLG5144 uses OpenShortPlus for testing");
-    expect(entities).toContain("wlg5144");
-    expect(entities).toContain("openshortplus");
+    const entities = extractEntities("DEVICE-42 uses ExampleSuite for testing");
+    expect(entities).toContain("device-42");
+    expect(entities).toContain("examplesuite");
   });
 
   it("filters stopwords (The, This, That, etc.)", () => {
@@ -39,12 +39,12 @@ describe("extractEntities (G2 Mem0 pattern)", () => {
   });
 
   it("returns lowercase entities", () => {
-    const entities = extractEntities("WLG5144 TypeScript");
+    const entities = extractEntities("DEVICE-42 TypeScript");
     expect(entities.every((e) => e === e.toLowerCase())).toBe(true);
   });
 
   it("deduplicates identical entities", () => {
-    const entities = extractEntities("WLG5144 WLG5144 WLG5144");
+    const entities = extractEntities("DEVICE-42 DEVICE-42 DEVICE-42");
     const unique = [...new Set(entities)];
     expect(entities).toEqual(unique);
   });

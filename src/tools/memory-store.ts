@@ -2,7 +2,7 @@
  * memory_store tool — store a memory entry (decision, constraint, gotcha, fact, note).
  */
 
-import { tool } from "@opencode-ai/plugin";
+import { tool } from "../shared/tool.js";
 import fs from "node:fs";
 import nodePath from "node:path";
 import type { SearchService } from "../search/service.js";

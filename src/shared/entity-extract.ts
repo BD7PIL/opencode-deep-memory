@@ -9,13 +9,13 @@
  */
 
 const ENTITY_PATTERNS: RegExp[] = [
-  // File names: consolidate.ts, WLG5144.py, index.js
+  // File names: consolidate.ts, DEVICE-42.py, index.js
   /\b[A-Za-z_][\w-]*\.(?:ts|js|py|go|rs|java|md|json|yaml|yml|sh)\b/g,
   // Function calls: buildPrompt(), handleIdleConsolidation()
   /\b[a-z_][a-zA-Z0-9_]*\(\)/g,
   // Version numbers: 3.6.8, 0.11.4, 1.2.3-beta
   /\b\d+\.\d+\.\d+(?:-\w+)?\b/g,
-  // PascalCase identifiers: WLG5144, OpenShortPlus, SimHash (3+ uppercase letters or uppercase-start)
+  // PascalCase identifiers: DEVICE-42, ExampleSuite, SimHash (3+ uppercase letters or uppercase-start)
   /\b[A-Z][a-zA-Z0-9_-]{2,}\b/g,
 ];
 

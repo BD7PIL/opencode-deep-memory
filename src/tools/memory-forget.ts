@@ -2,7 +2,7 @@
  * memory_forget tool — delete memory entries by content match.
  */
 
-import { tool } from "@opencode-ai/plugin";
+import { tool } from "../shared/tool.js";
 import type { SearchService } from "../search/service.js";
 
 /**
