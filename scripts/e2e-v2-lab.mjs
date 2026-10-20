@@ -378,6 +378,15 @@ async function main() {
     env: {
       ...process.env,
       HOME: home,
+      // HOME alone is NOT isolation: the engine resolves its config through
+      // XDG_CONFIG_HOME, and CI runners set it, so inheriting the runner's
+      // environment sent config resolution outside the lab entirely -- the
+      // engine then read no opencode.json, loaded no plugins and configured no
+      // provider. Pin every XDG root into the lab home so the sandbox is real.
+      XDG_CONFIG_HOME: join(home, ".config"),
+      XDG_DATA_HOME: join(home, ".local", "share"),
+      XDG_CACHE_HOME: join(home, ".cache"),
+      XDG_STATE_HOME: join(home, ".local", "state"),
       OPENCODE_DISABLE_AUTOUPDATE: "1",
       OPENCODE_SERVER_PASSWORD: PASSWORD,
       OPENCODE_SERVER_PORT: String(ENGINE_PORT),
