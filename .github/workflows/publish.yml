@@ -40,7 +40,9 @@ jobs:
         run: |
           npm pack --dry-run --json > /tmp/pack.json
           node -e "
-            const files = JSON.parse(require('fs').readFileSync('/tmp/pack.json'))[0].files.map(f => f.path);
+            const raw = JSON.parse(require('fs').readFileSync('/tmp/pack.json'));
+            const entry = Array.isArray(raw) ? raw[0] : raw;
+            const files = entry.files.map((f) => (typeof f === 'string' ? f : f.path));
             for (const required of ['dist/index.js', 'index.js', 'provision.json']) {
               if (!files.includes(required)) { console.error('missing ' + required); process.exit(1) }
             }
