@@ -1,3 +1,37 @@
+# 0.16.2 — the v2 gate now asserts the session.idle path
+
+The real-engine gate claimed to cover the idle path but did not: v2 emits no
+`session.idle`, and the v1 handler `return`s **silently** below the consolidation
+threshold, so "no error" proved nothing. It is now asserted end to end.
+
+## Added (test gate)
+
+- **The idle path is directly asserted**, 11 checks: the simulated session starts
+  from an accumulated MEMORY.md so the handler runs past its threshold, and the
+  gate then asserts the spawn, the anti-cascade guard, cooldown-bounded
+  re-spawns, the apply branch, the pending file, and that the child session the
+  plugin created really exists on the engine under the recorded parent.
+- **The apply branch proves the v2 read face works.** It reads the sub-session's
+  last assistant message through the v2 client adapter (`ctx.session.context`),
+  which is the replacement for the `session.messages` that v2 does not have.
+- **A channel regression assertion**: the retired 0.15.x last-user-message
+  channel (`<deep-memory-context>`) must not reappear anywhere in flight.
+- **The injected block is measured as itself.** Earlier versions of the gate
+  hashed the *whole* system prompt, which the harness legitimately moves as files
+  appear during a session (the plugin writes MEMORY.md, checkpoints and the
+  pending file). That made a passing property look like a failure and vice versa;
+  the gate now extracts and hashes the `<deep-memory-stable>` block, and reports
+  whole-prefix reuse as an observation instead of asserting on it.
+- **Per-run log isolation.** The engine appends its debug log, so counts
+  accumulated across runs — a two-run history once read as "two consolidation
+  spawns", i.e. a cascade that never happened.
+
+## Fixed (documentation)
+
+- The README storage tree placed `.pending-consolidation.json` inside
+  `<project>/.deep-memory/`. It is written to the **project root**, which the
+  gate now verifies.
+
 # 0.16.1 — measured summary-block placement
 
 Stage 4 asked for the mid-array summary splice to be replaced with

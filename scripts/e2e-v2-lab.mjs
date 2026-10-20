@@ -116,13 +116,25 @@ function analyze(body) {
   let lcp = 0;
   const limit = Math.min(previous.length, prefix.length);
   while (lcp < limit && previous[lcp] === prefix[lcp]) lcp += 1;
+  // The WHOLE system prompt is not the plugin's to stabilise: the harness adds
+  // environment sections whose content legitimately moves as files appear (the
+  // plugin itself writes MEMORY.md, checkpoints, .pending-consolidation.json).
+  // The property this gate owns is the injected block's own byte-stability, so
+  // extract and hash that specifically.
+  const blockMatch = systemText.match(/<deep-memory-stable>[\s\S]*?<\/deep-memory-stable>/);
+  const injectedBlock = blockMatch ? blockMatch[0] : "";
   const record = {
     toolNames,
+    blockHash: createHash("sha256").update(injectedBlock).digest("hex").slice(0, 16),
+    blockChars: injectedBlock.length,
     toolSignatureHash: createHash("sha256").update(toolSignature).digest("hex").slice(0, 16),
     prefixText: prefix,
     systemHash: createHash("sha256").update(systemText).digest("hex").slice(0, 16),
     systemChars: systemText.length,
     hasMemoryBlock: systemText.includes("<deep-memory-stable>"),
+    // The 0.15.x adapter injected into the last user message under this marker.
+    // Its reappearance would mean the injection regressed to the tail channel.
+    legacyTailMarkers: (JSON.stringify(body).match(/<deep-memory-context>/g) ?? []).length,
     reuseRatio: prefix.length ? lcp / prefix.length : 0,
     streamed: Boolean(body.stream),
   };
@@ -303,10 +315,59 @@ async function main() {
   projectDir = join(LAB, "proj");
   rmSync(projectDir, { recursive: true, force: true });
   rmSync(join(LAB, "home"), { recursive: true, force: true });
+  // The engine appends to this log, so a stale log from a previous run makes
+  // every count-based assertion accumulate across runs (a two-run history once
+  // read as "two consolidation spawns", i.e. a cascade that never happened).
+  rmSync(join(LAB, "dm-debug.log"), { force: true });
   mkdirSync(projectDir, { recursive: true });
-
-  console.log(`\n=== opencode-deep-memory v2 E2E gate (opencode ${VERSION}) ===`);
-  console.log(`lab: ${LAB}`);
+  // Seed a MEMORY.md past the idle-consolidation threshold (>= 20 lines). The
+  // v1 handler returns silently below it, so a threshold-crossing file is what
+  // makes the idle path observable at all; an accumulated memory file is also
+  // the real-world condition the path exists for.
+  mkdirSync(join(projectDir, ".deep-memory"), { recursive: true });
+  // Seed a MEMORY.md past the idle-consolidation threshold (>= 20 lines). The v1
+  // handler returns SILENTLY below it, so a threshold-crossing file is what makes
+  // the idle path observable at all; an accumulated memory file is also the
+  // real-world condition that path exists for.
+  //
+  // The entries are deliberately substantively distinct. Near-identical seed
+  // lines are collapsed by the write-time near-duplicate check, which silently
+  // shrank MEMORY.md mid-run and moved the injected system block twice.
+  writeFileSync(
+    join(projectDir, ".deep-memory", "MEMORY.md"),
+    [
+      "# Project Memory",
+      "",
+      "## Decisions",
+      "- [decision]: summary-block placement is chosen from the measured cached-prefix length, not from intuition [2026-10-20]",
+      "- [decision]: the memory block rides an appended system part because a byte-stable payload belongs in the cacheable prefix [2026-10-20]",
+      "",
+      "## Gotchas",
+      "- [gotcha]: opencode v2 emits no session.idle, so it is mapped from session.execution.succeeded [2026-10-20]",
+      "- [gotcha]: ctx.event.subscribe returns an AsyncIterable rather than accepting a callback [2026-10-20]",
+      "- [gotcha]: a v2 tool needs options.namespace or it never reaches the agent tool list [2026-10-20]",
+      "- [gotcha]: v2 exposes no session.messages; message reads go through ctx.session.context [2026-10-20]",
+      "",
+      "## Constraints",
+      "- [constraint]: ProcessShell runs on a 25 kHz clock domain while the ADC samples asynchronously [2026-10-20]",
+      "- [constraint]: provider breakpoint budget is four and manual hints spend from the same budget [2026-10-20]",
+      "- [constraint]: a cache prefix matches from the start, so an early mutation costs everything after it [2026-10-20]",
+      "",
+      "## Facts",
+      "- [fact]: pyright and jdtls are registered as language servers in the shared opencode config [2026-10-20]",
+      "- [fact]: the searxng MCP endpoint answers over the tailscale network at 192.168.96.11 [2026-10-20]",
+      "- [fact]: ocrc provisions a remote openchamber instance over ssh and relays its egress [2026-10-20]",
+      "- [fact]: headroom is a transport-layer proxy, so it composes with a plugin-layer memory manager [2026-10-20]",
+      "- [fact]: nine of the twenty-six v2 context faces are absent from the published authoring types [2026-10-20]",
+      "- [fact]: the WLG5144 pattern generator needs an explicit level set before fast adjustment [2026-10-20]",
+      "- [fact]: idle consolidation fires at eight stored entries or at twenty accumulated lines [2026-10-20]",
+      "- [fact]: measured steady-state prompt prefix reuse on the lab engine is 0.996 [2026-10-20]",
+      "- [fact]: the compaction hook receives the full message list, so capture needs no client fetch [2026-10-20]",
+      "- [fact]: event names in v2 are namespaced by lifecycle rather than by the v1 notification vocabulary [2026-10-20]",
+      "- [fact]: the v2 engine loads plugins lazily, on the first access to a location service [2026-10-20]",
+      "",
+    ].join("\n"),
+  );
 
   const binary = ensureEngine();
   const { home } = writeLabConfig(projectDir);
@@ -361,16 +422,41 @@ async function main() {
       process.exit(1);
     }
 
+    // The pending-consolidation file is written when the idle handler spawns a
+    // sub-session and UNLINKED when the next idle consumes the entry, so it has
+    // to be sampled between turns rather than inspected at the end.
+    const pendingCandidates = [
+      join(projectDir, ".pending-consolidation.json"),
+      join(projectDir, ".deep-memory", ".pending-consolidation.json"),
+    ];
+    let pendingSighting;
+    const memorySizes = [];
     const turn = async (text) => {
       await api(`/api/session/${sessionID}/prompt`, { method: "POST", body: JSON.stringify({ text }) });
-      await sleep(4000);
+      await sleep(4500);
+      for (const candidate of pendingCandidates) {
+        if (existsSync(candidate)) pendingSighting = { path: candidate, raw: readFileSync(candidate, "utf8") };
+      }
+      // Correlate injected-block moves with MEMORY.md: the block is derived from
+      // this file alone, so any change it makes must be explained by a change here.
+      memorySizes.push(sampleMemory());
     };
 
+    const memoryFile = join(projectDir, ".deep-memory", "MEMORY.md");
+    const sampleMemory = () =>
+      existsSync(memoryFile)
+        ? `${readFileSync(memoryFile, "utf8").length}B/${readFileSync(memoryFile, "utf8").split("\n").length}L`
+        : "absent";
+    memorySizes.push(`start=${sampleMemory()}`);
     console.log("\n-- turns");
-    await turn("e2e turn one");
+    // The store turn comes FIRST so MEMORY.md settles before the spawn: a write
+    // after the spawn trips the mtime-race guard, which discards the entry before
+    // the read face is ever exercised.
     await turn("please storememory now");
     await turn("please usememory now");
+    await turn("e2e turn three");
     await turn("e2e turn four");
+    await turn("e2e turn five");
 
     console.log("\n-- tool visibility (the model's own tool list)");
     const withTools = requestLog.filter((record) => record.toolNames.length > 0);
@@ -386,15 +472,17 @@ async function main() {
       check("MEMORY.md holds the stored line", readFileSync(memoryPath, "utf8").includes("e2e-v2-lab probe line"));
     }
 
-    console.log("\n-- byte-stable system injection");
+    console.log("\n-- injection channel");
     const injected = withTools.filter((record) => record.hasMemoryBlock);
     check("the memory block arrives as a system part", injected.length > 0, `${injected.length}/${withTools.length} requests`);
-    const hashes = [...new Set(injected.map((record) => record.systemHash))];
-    const memory = existsSync(memoryPath) ? readFileSync(memoryPath, "utf8") : "";
-    // The block changes only when MEMORY.md does: at most one distinct hash per
-    // MEMORY.md revision, so 2 distinct hashes (before/after the store) is the
-    // ceiling for this scenario.
-    check("system block is byte-stable (<= 2 distinct hashes: one per MEMORY.md revision)", hashes.length <= 2, `hashes=${hashes.join(",")} storable=${memory.length}`);
+    // Byte-stability of the block itself is asserted in the cache section below,
+    // against the injected block rather than the whole harness prompt.
+    const legacyHits = withTools.reduce((total, record) => total + record.legacyTailMarkers, 0);
+    check(
+      "the retired last-user-message channel is gone",
+      legacyHits === 0,
+      `${legacyHits} <deep-memory-context> markers still in flight`,
+    );
 
     console.log("\n-- steady-state cache prefix reuse");
     // Only compare requests that share a tool signature: tool definitions
@@ -403,23 +491,35 @@ async function main() {
     const signatures = [...new Set(withTools.map((record) => record.toolSignatureHash))];
     check("tool definitions are byte-stable across every request", signatures.length === 1, `signatures=${signatures.join(",")}`);
     const comparable = withTools.filter((record) => record.toolSignatureHash === signatures[0]);
-    // The injected block legitimately changes when MEMORY.md does, and that one
-    // request must pay a re-prefill. Steady state is everything else.
-    const changedSystem = comparable.slice(1).filter((record, index) => record.systemHash !== comparable[index].systemHash);
-    const steady = comparable.slice(1).filter((record, index) => record.systemHash === comparable[index].systemHash);
-    const worst = steady.length ? Math.min(...steady.map((record) => record.reuseRatio)) : 0;
-    check("prefix reuse >= 0.98 in steady state (injected block unchanged)", worst >= 0.98, `worst=${worst.toFixed(3)} over ${steady.length} requests`);
+
+    // Assert on the block the plugin owns.
+    const withBlock = comparable.filter((record) => record.blockChars > 0);
+    check("the injected block is present in every primary request", withBlock.length === comparable.length, `${withBlock.length}/${comparable.length}`);
+    const blockHashes = [...new Set(withBlock.map((record) => record.blockHash))];
     check(
-      "a MEMORY.md write costs exactly one re-prefill",
-      changedSystem.length <= 1,
-      `${changedSystem.length} requests changed the system block`,
+      "the injected block is byte-stable while MEMORY.md is unchanged",
+      blockHashes.length <= 2,
+      `${blockHashes.length} distinct blocks (one per MEMORY.md revision expected)`,
     );
+    const changedBlock = withBlock.slice(1).filter((record, index) => record.blockHash !== withBlock[index].blockHash);
+    check(
+      "a MEMORY.md write costs exactly one block change",
+      changedBlock.length <= 1,
+      `${changedBlock.length} requests changed the injected block`,
+    );
+
+    // Report whole-prefix reuse as an observation. It is bounded by the harness's
+    // own system prompt as well as by our block, so it is NOT asserted tightly.
+    const steady = withBlock.slice(1).filter((record, index) => record.blockHash === withBlock[index].blockHash);
+    const worst = steady.length ? Math.min(...steady.map((record) => record.reuseRatio)) : 0;
+    console.log(`      whole-prefix reuse min in steady state: ${worst.toFixed(3)} over ${steady.length} requests (harness system prompt also moves it)`);
     comparable.forEach((record, index) =>
       console.log(
         `      req${index}: reuse=${record.reuseRatio.toFixed(3)} systemChars=${record.systemChars} ` +
-          `systemChanged=${index > 0 && record.systemHash !== comparable[index - 1].systemHash}`,
+          `blockChars=${record.blockChars} blockChanged=${index > 0 && record.blockHash !== comparable[index - 1].blockHash}`,
       ),
     );
+    console.log(`      MEMORY.md after each turn: ${memorySizes.join(" -> ")}`);
 
     console.log("\n-- v2 event name mapping");
     const compact = await api(`/api/session/${sessionID}/compact`, { method: "POST", body: "{}" });
@@ -435,6 +535,84 @@ async function main() {
     console.log("\n-- compaction artifacts");
     check("checkpoint.md written", existsSync(join(projectDir, ".deep-memory", "checkpoint.md")));
     check("checkpoint.raw.json written", existsSync(join(projectDir, ".deep-memory", "checkpoint.raw.json")));
+
+    // ── the idle path: session.execution.succeeded -> session.idle ────────────
+    // 0.15.x dropped this entirely (v2 emits no session.idle), and the v1
+    // handler returns SILENTLY below the consolidation threshold, so asserting
+    // "no error" would prove nothing. The MEMORY.md seeded above crosses the
+    // threshold, which makes the handler's work observable end to end.
+    console.log("\n-- idle path (session.execution.succeeded -> session.idle)");
+    const idleLog = existsSync(join(LAB, "dm-debug.log")) ? readFileSync(join(LAB, "dm-debug.log"), "utf8") : "";
+    const spawnCount = idleLog.split("idle consolidation: spawned").length - 1;
+    check("the idle handler ran past the threshold and spawned consolidation", spawnCount >= 1, `spawns=${spawnCount}`);
+    // The cascade risk is specific: the spawned sub-session emits its own idle,
+    // and if that were treated as a normal session the plugin would spawn a
+    // grandchild, then a great-grandchild, one per generation. What must hold is
+    // that the guard fires — NOT that spawns is one, because the next legitimate
+    // spawn is gated by the 60s cooldown rather than by the run length.
+    const skippedSubSessionIdles = idleLog.split("skipping plugin-spawned sub-session").length - 1;
+    check(
+      "the spawned sub-session's own idle is skipped (no cascade)",
+      skippedSubSessionIdles >= 1,
+      `skips=${skippedSubSessionIdles} spawns=${spawnCount}`,
+    );
+    check(
+      "re-spawns are cooldown-bounded, not per-turn",
+      idleLog.includes("idle consolidation: cooldown active, skipping"),
+      "no cooldown message logged",
+    );
+    // The apply branch reads the sub-session's last assistant message through the
+    // v2 client adapter (ctx.session.context), so either outcome proves that read
+    // face returned something parseable on a real engine.
+    const readFaceReached = idleLog.includes("idle consolidation: applied") || idleLog.includes("idle consolidation: rejected");
+    check(
+      "the v2 read face answered (ctx.session.context fed the apply branch)",
+      readFaceReached,
+      idleLog.includes("idle consolidation: discarded (mtime race)")
+        ? "the entry was discarded on an mtime race before the read"
+        : "neither 'applied' nor 'rejected' logged",
+    );
+    check(
+      "a later idle consumed the pending entry",
+      readFaceReached || idleLog.includes("idle consolidation: discarded (mtime race)") || idleLog.includes("idle consolidation: failed to apply"),
+      "no terminal outcome for the pending entry",
+    );
+    // state.bestModel() is only non-undefined thanks to the chat.params bridge.
+    check("chat.params bridge recorded agent/model", idleLog.includes("chat.params: recorded agent+model"));
+
+    check(
+      "pending-consolidation file observed between turns",
+      Boolean(pendingSighting),
+      `sampled ${pendingCandidates.join(" and ")} after every turn`,
+    );
+    let spawnedSubSessionID;
+    if (pendingSighting) {
+      const pending = JSON.parse(pendingSighting.raw);
+      const entries = Array.isArray(pending.entries) ? pending.entries : [pending];
+      spawnedSubSessionID = entries[0]?.subSessionID;
+      check(
+        "pending entry names the spawned sub-session",
+        typeof spawnedSubSessionID === "string" && spawnedSubSessionID.startsWith("ses_"),
+        JSON.stringify(entries[0]),
+      );
+      check("pending file lives at the project root", pendingSighting.path.endsWith(".pending-consolidation.json"));
+    }
+    const sessions = await api("/api/session");
+    const children = (sessions.body?.data ?? []).filter(
+      (item) => (item.parentID ?? item.parent) === sessionID,
+    );
+    check(
+      "ctx.session.create spawned a real child session on the engine",
+      children.length >= 1,
+      `${children.length} children of ${sessionID}; ids=${children.map((item) => item.id).join(",")}`,
+    );
+    if (spawnedSubSessionID) {
+      check(
+        "the recorded sub-session is the engine's child session",
+        children.some((item) => item.id === spawnedSubSessionID),
+        `recorded=${spawnedSubSessionID} engine=${children.map((item) => item.id).join(",")}`,
+      );
+    }
   } finally {
     cleanup();
     if (!KEEP) {

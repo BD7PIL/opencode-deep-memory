@@ -78,7 +78,7 @@ Memory lives at `.deep-memory/` in your project root.
 
 | Change | Detail |
 |---|---|
-| P0: LLM memory consolidation | compaction triggers `client.session.create` + `promptAsync` (subagent), runs Mem0-style ADD/UPDATE/DELETE on MEMORY.md. Mtime race detection prevents overwriting concurrent `memory_store` writes. Pending state persisted to `.pending-consolidation.json`, restored on startup. |
+| P0: LLM memory consolidation | compaction triggers `client.session.create` + `promptAsync` (subagent), runs Mem0-style ADD/UPDATE/DELETE on MEMORY.md. Mtime race detection prevents overwriting concurrent `memory_store` writes. Pending state persisted to `<project>/.pending-consolidation.json` (project root, not the `.deep-memory/` directory), restored on startup. |
 | P1: Content-aware compress | `context_compress` accepts `summary` parameter (LLM-written). Tool outputs classified as transient/bash, stale/read-of-edited-file, summarize/other, preserve/protected. Summary block injected as assistant message (not user message, avoids breaking "never touch user messages" rule). |
 | P2: Keep-pattern tightening | `compressAssistantText` removed bullet points (`-`/`*`) from retained lines. Savings ratio 0.6→0.7. V4 benchmark: 25% trigger rate → V5: ~40%. |
 | P3: Event-driven nudges | Three nudge types: threshold (≥50K tokens, once per session), emergency (≥120K), PostCompact (after compaction). Injected into last tool result, not per-message. Cooldown prevents obsessive loops (DCP Issue #439). |
@@ -192,16 +192,17 @@ No background LLM sessions, no `client.session.promptAsync` fire-and-forget, no 
 ## Storage
 
 ```
-<project>/.deep-memory/
-├── MEMORY.md                  persistent memory (200 line cap, user curated)
-├── MEMORY-archive.md          overflow when cap is reached
-├── MEMORY.bak.md              backup before LLM consolidation overwrite
-├── checkpoint.md              last compaction extraction
-├── checkpoint.raw.json        raw message dump (memory_expand reads this)
-├── .compaction-log.jsonl      compaction audit trail
-├── .index-state.json          BM25 index mtime tracker
-├── .pending-consolidation.json   persistent LLM subagent state (survives restarts)
-└── .tool-outputs/             captured tool outputs (offline noise reduction)
+<project>/
+├── .deep-memory/
+│   ├── MEMORY.md              persistent memory (200 line cap, user curated)
+│   ├── MEMORY-archive.md      overflow when cap is reached
+│   ├── MEMORY.bak.md          backup before LLM consolidation overwrite
+│   ├── checkpoint.md          last compaction extraction
+│   ├── checkpoint.raw.json    raw message dump (memory_expand reads this)
+│   ├── .compaction-log.jsonl  compaction audit trail
+│   ├── .index-state.json      BM25 index mtime tracker
+│   └── .tool-outputs/         captured tool outputs (offline noise reduction)
+└── .pending-consolidation.json   LLM subagent state (survives restarts)
 ```
 
 ## Configuration
