@@ -390,6 +390,32 @@ async function main() {
   engine.stdout.on("data", (chunk) => engineLog.push(String(chunk)));
   engine.stderr.on("data", (chunk) => engineLog.push(String(chunk)));
 
+  const dumpDiagnostics = async (adapterLog) => {
+    console.log("\n-- diagnostics (engine log tail)");
+    console.log(engineLog.join("").slice(-3000) || "(engine produced no output)");
+    try {
+      // The engine's own plugin registry is the authoritative answer to "was the
+      // plugin seen, and did it come up?", which a grep of our own log cannot give.
+      const plugins = await api("/api/plugin");
+      const entries = (plugins.body?.data ?? []).map((entry) => ({
+        id: entry.id,
+        source: entry.source?.type,
+        status: entry.state?.status,
+      }));
+      console.log("-- diagnostics (/api/plugin): " + JSON.stringify(entries).slice(0, 2000));
+    } catch (error) {
+      console.log("-- diagnostics (/api/plugin) failed: " + String(error));
+    }
+    console.log("-- diagnostics (adapter log tail)");
+    console.log((adapterLog || "(no adapter log at all)").slice(-2000));
+    console.log(
+      `-- diagnostics: ${requestLog.length} LLM requests logged; ` +
+        `adapter log ${adapterLog ? "present" : "MISSING"}; ` +
+        `dist ${existsSync(join(REPO, "dist", "index.js")) ? "present" : "MISSING"}; ` +
+        `wrapper ${existsSync(join(LAB, "plugin", "index.js")) ? "present" : "MISSING"}`,
+    );
+  };
+
   const cleanup = () => {
     try { engine.kill("SIGKILL"); } catch { /* already gone */ }
     try { stub.close(); } catch { /* already closed */ }
@@ -414,6 +440,13 @@ async function main() {
     check("execute.after registered (not the invalid \"*\")", debugLog.includes("execute.after hook registered"));
     check("event subscription started", debugLog.includes("event subscription started"));
     check("all 7 tools registered via tool.transform", debugLog.includes("tool.transform: registered 7"), debugLog);
+
+    if (failures > 0) {
+      // Nothing downstream can be meaningful if the plugin never came up, and
+      // continuing would spend five turns of condition-waits before saying so.
+      await dumpDiagnostics(debugLog);
+      throw new Error("opencode v2 plugin did not load — see diagnostics above");
+    }
 
     const created = await api("/api/session", { method: "POST", body: JSON.stringify({ directory: projectDir }) });
     const sessionID = created.body?.data?.id;
@@ -654,15 +687,7 @@ async function main() {
   }
 
   if (failures > 0) {
-    console.log("\n-- diagnostics (engine log tail)");
-    console.log(engineLog.join("").slice(-3000));
-    const tail = existsSync(join(LAB, "dm-debug.log")) ? readFileSync(join(LAB, "dm-debug.log"), "utf8") : "(no adapter log)";
-    console.log("\n-- diagnostics (adapter log tail)");
-    console.log(tail.slice(-2000));
-    console.log(`\n-- diagnostics: ${requestLog.length} requests logged, load contract: ${existsSync(join(LAB, "dm-debug.log")) ? "adapter log present" : "NO ADAPTER LOG"}`);
-    if (!existsSync(join(LAB, "plugins"))) {
-      console.log("-- diagnostics: engine resolved no plugin dir under the lab home");
-    }
+    await dumpDiagnostics(existsSync(join(LAB, "dm-debug.log")) ? readFileSync(join(LAB, "dm-debug.log"), "utf8") : "");
   }
 
   console.log(`\n=== ${checks - failures}/${checks} checks passed ===`);
