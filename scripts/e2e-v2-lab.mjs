@@ -431,14 +431,33 @@ async function main() {
     ];
     let pendingSighting;
     const memorySizes = [];
-    const turn = async (text) => {
-      await api(`/api/session/${sessionID}/prompt`, { method: "POST", body: JSON.stringify({ text }) });
-      await sleep(4500);
+    const waitUntil = async (predicate, timeoutMs, label) => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        if (predicate()) return true;
+        await sleep(500);
+      }
+      console.log(`      (timed out after ${timeoutMs}ms waiting for ${label})`);
+      return false;
+    };
+
+    const turn = async (text, expect) => {
+      const before = requestLog.length;
+      const response = await api(`/api/session/${sessionID}/prompt`, {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      });
+      if (response.status !== 200) {
+        console.log(`      prompt "${text}" -> HTTP ${response.status}: ${JSON.stringify(response.body).slice(0, 300)}`);
+      }
+      // Condition-based, not a fixed sleep: on a cold CI runner the engine
+      // installs the provider SDK on the first model call, which takes far
+      // longer than the warm local lab where fixed sleeps looked sufficient.
+      await waitUntil(() => requestLog.length > before, 180_000, `an LLM request for "${text}"`);
+      if (expect) await waitUntil(expect, 180_000, "the expected effect of that turn");
       for (const candidate of pendingCandidates) {
         if (existsSync(candidate)) pendingSighting = { path: candidate, raw: readFileSync(candidate, "utf8") };
       }
-      // Correlate injected-block moves with MEMORY.md: the block is derived from
-      // this file alone, so any change it makes must be explained by a change here.
       memorySizes.push(sampleMemory());
     };
 
@@ -447,19 +466,22 @@ async function main() {
       existsSync(memoryFile)
         ? `${readFileSync(memoryFile, "utf8").length}B/${readFileSync(memoryFile, "utf8").split("\n").length}L`
         : "absent";
+    const seededMemory = readFileSync(memoryFile, "utf8");
     memorySizes.push(`start=${sampleMemory()}`);
     console.log("\n-- turns");
     // The store turn comes FIRST so MEMORY.md settles before the spawn: a write
     // after the spawn trips the mtime-race guard, which discards the entry before
     // the read face is ever exercised.
-    await turn("please storememory now");
+    await turn("please storememory now", () => readFileSync(memoryFile, "utf8") !== seededMemory);
     await turn("please usememory now");
     await turn("e2e turn three");
     await turn("e2e turn four");
     await turn("e2e turn five");
 
     console.log("\n-- tool visibility (the model's own tool list)");
+    check("the stub LLM was reached at all", requestLog.length > 0, `${requestLog.length} requests logged`);
     const withTools = requestLog.filter((record) => record.toolNames.length > 0);
+    check("at least one request carried a tool list", withTools.length > 0, `${withTools.length} of ${requestLog.length}`);
     const visible = new Set(withTools.flatMap((record) => record.toolNames));
     for (const name of ["memory_search", "memory_store", "memory_forget", "memory_expand", "memory_topic", "context_compress", "deep_expand"]) {
       check(`${name} visible to the model`, visible.has(name));
@@ -467,7 +489,13 @@ async function main() {
 
     console.log("\n-- tool execution");
     const memoryPath = join(projectDir, ".deep-memory", "MEMORY.md");
-    check("memory_store executed and wrote MEMORY.md", existsSync(memoryPath));
+    // Non-vacuous: the gate seeds MEMORY.md itself, so mere existence proves
+    // nothing. It must have CHANGED.
+    check(
+      "memory_store executed and wrote MEMORY.md",
+      existsSync(memoryPath) && readFileSync(memoryPath, "utf8") !== seededMemory,
+      existsSync(memoryPath) ? "file unchanged from the seed" : "file missing",
+    );
     if (existsSync(memoryPath)) {
       check("MEMORY.md holds the stored line", readFileSync(memoryPath, "utf8").includes("e2e-v2-lab probe line"));
     }
@@ -494,7 +522,11 @@ async function main() {
 
     // Assert on the block the plugin owns.
     const withBlock = comparable.filter((record) => record.blockChars > 0);
-    check("the injected block is present in every primary request", withBlock.length === comparable.length, `${withBlock.length}/${comparable.length}`);
+    check(
+      "the injected block is present in every primary request",
+      comparable.length > 0 && withBlock.length === comparable.length,
+      `${withBlock.length}/${comparable.length}`,
+    );
     const blockHashes = [...new Set(withBlock.map((record) => record.blockHash))];
     check(
       "the injected block is byte-stable while MEMORY.md is unchanged",
@@ -618,6 +650,18 @@ async function main() {
     if (!KEEP) {
       // Keep the downloaded engine (the expensive part) but drop per-run state.
       rmSync(projectDir, { recursive: true, force: true });
+    }
+  }
+
+  if (failures > 0) {
+    console.log("\n-- diagnostics (engine log tail)");
+    console.log(engineLog.join("").slice(-3000));
+    const tail = existsSync(join(LAB, "dm-debug.log")) ? readFileSync(join(LAB, "dm-debug.log"), "utf8") : "(no adapter log)";
+    console.log("\n-- diagnostics (adapter log tail)");
+    console.log(tail.slice(-2000));
+    console.log(`\n-- diagnostics: ${requestLog.length} requests logged, load contract: ${existsSync(join(LAB, "dm-debug.log")) ? "adapter log present" : "NO ADAPTER LOG"}`);
+    if (!existsSync(join(LAB, "plugins"))) {
+      console.log("-- diagnostics: engine resolved no plugin dir under the lab home");
     }
   }
 
