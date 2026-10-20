@@ -38,15 +38,12 @@ jobs:
 
       - name: Check the published tarball ships the directory entry
         run: |
-          npm pack --dry-run --json > /tmp/pack.json
-          node -e "
-            const raw = JSON.parse(require('fs').readFileSync('/tmp/pack.json'));
-            const entry = Array.isArray(raw) ? raw[0] : raw;
-            const files = entry.files.map((f) => (typeof f === 'string' ? f : f.path));
-            for (const required of ['dist/index.js', 'index.js', 'provision.json']) {
-              if (!files.includes(required)) { console.error('missing ' + required); process.exit(1) }
-            }
-          "
+          T="$(npm pack --silent | tail -1)"
+          echo "tarball: $T"
+          for f in package/dist/index.js package/index.js package/provision.json; do
+            tar -tzf "$T" | grep -qx "$f" || { echo "::error::missing $f"; exit 1; }
+          done
+          echo "tarball ships dist, the directory entry and provision.json"
 
       - name: Publish
         run: npm publish --provenance --access public
