@@ -26,6 +26,22 @@ threshold, so "no error" proved nothing. It is now asserted end to end.
   accumulated across runs — a two-run history once read as "two consolidation
   spawns", i.e. a cascade that never happened.
 
+## Fixed (release pipeline — this blocked the 0.16.2 publish)
+
+- **`npm test` could not pass on a clean checkout, so neither could
+  `npm run verify`.** `tests/tools/memory-store.realshape.test.ts` loads the
+  BUILT `dist/` on purpose (it validates the artifact a host actually loads),
+  but `verify` and `ci.yml` both ran `test` BEFORE `build` — and `dist/` is
+  gitignored, so on a clean checkout the import failed with
+  `Failed to load url .../dist/index.js`. It passed locally only because a
+  previous build had left `dist/` lying around.
+  This is why CI has been **red on `main` since 0.15.1** and why the `v0.15.1`
+  publish run failed: `publish.yml` runs `npm run verify`, i.e. the same broken
+  order. Fixed from both directions: the test now declares its own dependency
+  (it builds `dist` if missing, so `npm test` alone works on a clean clone), and
+  `verify` / `ci.yml` build before testing, which is the convention the other
+  artifact tests (`smoke`, `e2e`) already relied on.
+
 ## Fixed (documentation)
 
 - The README storage tree placed `.pending-consolidation.json` inside

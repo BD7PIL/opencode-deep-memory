@@ -26,11 +26,14 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Test
-        run: npm test
-
+      # Build BEFORE Test: tests/tools/memory-store.realshape.test.ts loads the
+      # built dist on purpose (it validates the artifact a host actually loads),
+      # and dist/ is gitignored, so on a clean checkout Test cannot run first.
       - name: Build
         run: npm run build
+
+      - name: Test
+        run: npm test
 
       - name: Smoke test
         run: npm run smoke

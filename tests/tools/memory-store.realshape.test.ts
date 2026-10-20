@@ -73,7 +73,16 @@ beforeAll(async () => {
   tmpProject = fs.mkdtempSync(path.join(os.tmpdir(), "dm-realshape-"));
   tmpGlobal = fs.mkdtempSync(path.join(os.tmpdir(), "dm-realshape-global-"));
   process.env["DEEP_MEMORY_GLOBAL_ROOT"] = tmpGlobal;
-});
+
+  // This file tests the BUILT artifact, so it owns that dependency: dist/ is
+  // gitignored, and relying on the runner to have built first is what made CI
+  // red on main from 0.15.1 — `npm test` alone failed on a clean checkout while
+  // passing locally, where dist/ was already lying around from a previous build.
+  if (!fs.existsSync(path.resolve("dist/index.js"))) {
+    const { execFileSync } = await import("node:child_process");
+    execFileSync("npx", ["tsup"], { cwd: path.resolve("."), stdio: "ignore" });
+  }
+}, 180_000);
 
 afterAll(() => {
   try { fs.rmSync(tmpProject, { recursive: true, force: true }); } catch { /* gone */ }

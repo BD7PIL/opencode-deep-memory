@@ -23,7 +23,7 @@
     "test:coverage": "vitest run --coverage",
     "smoke": "node scripts/smoke.mjs",
     "e2e": "node scripts/e2e.mjs",
-    "verify": "npm run typecheck && npm test && npm run build && npm run smoke && npm run e2e",
+    "verify": "npm run typecheck && npm run build && npm test && npm run smoke && npm run e2e",
     "prepublishOnly": "npm run build",
     "e2e:real-bugs": "node scripts/e2e-real-bugs.mjs",
     "e2e:v2": "node scripts/e2e-v2-lab.mjs",
