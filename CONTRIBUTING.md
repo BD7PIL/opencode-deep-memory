@@ -28,8 +28,15 @@ npm run e2e:v2            # real opencode v2 engine against a stub LLM (38 check
 ```
 
 On a real release also run `npm run verify:release`, which adds the v2 gate to
-the full sequence. CI runs all of the above plus a coverage report (report
-only; no threshold yet).
+the full sequence. CI runs all of the above plus the coverage gate below.
+
+## Coverage
+
+`npm run test:coverage` enforces the hard floor in `vitest.config.ts`
+(`coverage.thresholds`). It only ratchets up: raise a threshold together with
+the tests that raised it — never lower one to make a red run green. A weekly CI
+cron also runs `BENCH=1 npm test` for the timing benchmark suite, which is
+skipped on PRs on purpose (loose timing assertions flake on loaded machines).
 
 ## Tests and fixtures
 

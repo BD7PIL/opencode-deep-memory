@@ -5,6 +5,17 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  schedule:
+    # 每周一 04:00 UTC：跑基准套件（BENCH=1 解锁 tests/benchmark）。基准有
+    # 时间断言，不适合 PR 路径（加载中的 CI 机器会晃），但也绝不能烂掉——
+    # 这条 cron 是它的看门人。
+    - cron: "0 4 * * 1"
+
+env:
+  # opencode v2 引擎版本：一处定义。scripts/e2e-v2-lab.mjs 读它做默认值，
+  # 下面的缓存 key 也读它——升引擎时只改这一行，缓存 key 跟着走，不会再出现
+  # "脚本升了、缓存 key 忘了、每周都当缓存 miss 重下"的漂移。
+  E2E_V2_VERSION: "2.0.32"
 
 jobs:
   test:
@@ -41,9 +52,9 @@ jobs:
       - name: Test
         run: npm test
 
-      # Report only: no threshold yet. The number is here so coverage drift is
-      # visible in every run instead of being discovered during a release.
-      - name: Coverage report (no threshold)
+      # Thresholds live in vitest.config.ts coverage.thresholds (hard floor,
+      # only ratchets up); vitest exits non-zero when any metric drops below.
+      - name: Coverage gate (thresholds in vitest.config.ts)
         run: npm run test:coverage
 
       - name: Smoke test
@@ -59,12 +70,28 @@ jobs:
       # namespace, events arrive as an AsyncIterable, and v2's event names differ
       # from v1's. A mocked host cannot disagree with the adapter's assumptions,
       # so this gate boots a real opencode v2 engine against a stub LLM.
-      # Bump this cache key whenever E2E_V2_VERSION changes.
+      # Bump env.E2E_V2_VERSION (top of file) when the engine version changes —
+      # the cache key reads the same variable, so they can never drift apart.
       - name: Cache the opencode v2 engine
         uses: actions/cache@v4
         with:
           path: /tmp/dm-e2e-v2-*
-          key: opencode-v2-engine-${{ runner.os }}-2.0.32
+          key: opencode-v2-engine-${{ runner.os }}-${{ env.E2E_V2_VERSION }}
 
       - name: v2 real-engine E2E gate
         run: npm run e2e:v2
+
+  # Weekly only (see `schedule:` at the top): the benchmark suite with its
+  # timing assertions. Keeps the numbers honest without taxing PR runs.
+  bench:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - run: npm run build
+      - name: Benchmark suite (BENCH=1)
+        run: BENCH=1 npm test

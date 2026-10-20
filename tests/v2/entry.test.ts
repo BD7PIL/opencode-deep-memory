@@ -16,7 +16,7 @@
  *     the E5 live stack).
  */
 import { describe, expect, it, beforeEach } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -230,5 +230,32 @@ describe("debug channel", () => {
     // No assertion possible on the file without heavy env mocking; the contract
     // is just "does not throw".
     expect(() => appendDebugLine("unit-test line")).not.toThrow();
+  });
+
+  it("appends one timestamped line to DEEP_MEMORY_LOG_FILE when enabled, and stays silent for falsy gates", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dm-debug-"));
+    const logFile = join(dir, "nested", "debug.log"); // dir must be created by the channel
+    const savedDebug = process.env["DEEP_MEMORY_DEBUG"];
+    const savedFile = process.env["DEEP_MEMORY_LOG_FILE"];
+    try {
+      process.env["DEEP_MEMORY_DEBUG"] = "1";
+      process.env["DEEP_MEMORY_LOG_FILE"] = logFile;
+      appendDebugLine("hello channel");
+      const content = readFileSync(logFile, "utf-8");
+      expect(content).toMatch(/^\[\d{4}-\d{2}-\d{2}T[\d:.]+Z\] \[INFO\] hello channel\n$/);
+
+      // "0" and "false" are the documented off-switches, not just "unset".
+      for (const off of ["0", "false"]) {
+        process.env["DEEP_MEMORY_DEBUG"] = off;
+        appendDebugLine("must not appear");
+      }
+      expect(readFileSync(logFile, "utf-8")).not.toContain("must not appear");
+    } finally {
+      if (savedDebug === undefined) delete process.env["DEEP_MEMORY_DEBUG"];
+      else process.env["DEEP_MEMORY_DEBUG"] = savedDebug;
+      if (savedFile === undefined) delete process.env["DEEP_MEMORY_LOG_FILE"];
+      else process.env["DEEP_MEMORY_LOG_FILE"] = savedFile;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
