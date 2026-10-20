@@ -1,3 +1,39 @@
+# 0.16.1 — measured summary-block placement
+
+Stage 4 asked for the mid-array summary splice to be replaced with
+"append-then-cut". Measuring it first (`npm run measure:summary-placement`, added
+here) showed the instruction's premise does not hold on this code path, so the
+change shipped is conditional instead. Numbers and the full deviation record:
+`docs/research/stage4-cache-work.md`.
+
+## Changed
+
+- **Summary-block placement is now chosen from the pass's own result.**
+  When the compression pass rewrote history, splicing at `cutoff` was measured to
+  cost **exactly nothing** — the cached prefix ends at the first rewrite, not at
+  the insert — so the ordered placement is kept (all four candidate placements
+  tie: 17 messages / 7202 chars re-prefilled). When the pass rewrote **nothing**,
+  the insert is the only mutation and the splice re-prefilled the entire retained
+  tail (**8 messages / 656 chars**); there the summary is appended instead
+  (**0 / 0**). Marking the compressed zone's old assistant messages now runs
+  before the insert so that decision can be made on the real result.
+- A "no index shift" placement that anchors the summary to the compressed zone's
+  last message was measured as well and is **worse** than the splice
+  (9 messages / 738 chars), so it was not shipped.
+- The summary is never dropped: in the no-compression case it is appended rather
+  than discarded, so the agent's `context_compress(summary=...)` content survives.
+
+## Added
+
+- `scripts/measure-summary-placement.mts` — a reproducible, engine-free
+  measurement of the four candidate placements plus the shipped policy, scored by
+  cached-prefix length. Exposed as `npm run measure:summary-placement`.
+- `tests/hooks/summary-placement.test.ts` — asserts the summary precedes the
+  retained tail when the pass compressed something, that the retained tail keeps
+  its bytes when it did not, and that exactly one summary block is inserted.
+- `docs/research/stage4-cache-work.md` — the decision record for all three Stage 4
+  items, including the deviation from the literal append-then-cut instruction.
+
 # 0.16.0 — opencode v2 re-adaptation on 2.0.32 + prompt-cache work
 
 Re-verified the whole v2 adapter against a real **opencode 2.0.32** engine and

@@ -270,18 +270,9 @@ export function createMessagesTransformHandler(
         }
       }
 
-      // Inject summary block as assistant message at cutoff position
       if (compressReq.summary) {
-        const summaryMsg = {
-          info: { role: "assistant" },
-          parts: [{
-            type: "text",
-            text: `[compressed-block: messages 1-${cutoff}]\n${compressReq.summary}\n[/compressed-block]`,
-          }],
-        };
-        messages.splice(cutoff, 0, summaryMsg as never);
-
-        // Mark old assistant messages in compressed zone
+        // Mark old assistant messages in the compressed zone FIRST, so the
+        // summary insert can be placed based on what the pass actually did.
         for (let i = 2; i < cutoff; i++) {
           const msg = messages[i] as { info: { role: string }; parts: unknown[] } | undefined;
           if (!msg?.parts) continue;
@@ -296,6 +287,34 @@ export function createMessagesTransformHandler(
             p["text"] = `[compressed — call deep_expand("${hash}") to restore original]`;
             compressed++;
           }
+        }
+
+        const summaryMsg = {
+          info: { role: "assistant" },
+          parts: [{
+            type: "text",
+            text: `[compressed-block: messages 1-${cutoff}]\n${compressReq.summary}\n[/compressed-block]`,
+          }],
+        };
+
+        // Placement is measured, not assumed —
+        // see scripts/measure-summary-placement.mts and docs/research/stage4-cache-work.md.
+        //
+        // When this pass rewrote anything, splicing at `cutoff` costs exactly
+        // nothing: the divergence point is set by the rewrites just above, not by
+        // the insert, so the ordered placement is free — and order is the reason
+        // the block exists.
+        //
+        // When this pass rewrote nothing, the insert is the ONLY mutation, and a
+        // mid-array splice re-prefilled the entire retained tail (8 messages /
+        // 656 chars measured). Appending costs zero. Ordering is moot in that
+        // case: with no compressed block, there is nothing for the summary to
+        // precede.
+        if (compressed > 0) {
+          messages.splice(cutoff, 0, summaryMsg as never);
+        } else {
+          messages.push(summaryMsg as never);
+          logger?.debug("messages.transform: summary appended (pass compressed nothing)");
         }
       }
 
