@@ -22,6 +22,7 @@ import { installPluginCommands } from "./shared/install-commands.js";
 import { projectMemoryDir, memoryFilePath } from "./shared/paths.js";
 import { createPluginState } from "./hooks/shared-state.js";
 import { createChatParamsHandler } from "./hooks/chat-params.js";
+import { createChatMessageHandler } from "./hooks/chat-message.js";
 import { createSystemTransformHandler } from "./hooks/system-transform.js";
 import { SearchService } from "./search/service.js";
 import { createMemoryTools, createDeepExpandTool } from "./tools/index.js";
@@ -107,6 +108,11 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
     "chat.params": createChatParamsHandler(
       state,
       logger.for("chat-params"),
+    ),
+
+    "chat.message": createChatMessageHandler(
+      state,
+      logger.for("chat-message"),
     ),
 
     "experimental.chat.system.transform": createSystemTransformHandler(

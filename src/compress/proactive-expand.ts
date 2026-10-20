@@ -7,6 +7,12 @@
  *
  * Uses entity extraction (v0.12.1) + Jaccard overlap for relevance matching.
  * Throttled to once per 3 seconds to amortize cost.
+ *
+ * CACHE DISCIPLINE: the restoration rides the LAST USER MESSAGE, not the
+ * compressed tool output it refers to. That output sits mid-history, so
+ * annotating it in place invalidated every message after it — potentially the
+ * whole conversation — to inject at most 3 KB. At the tail the only bytes that
+ * must be prefilled are the bytes actually added.
  */
 
 import type { PluginState } from "../hooks/shared-state.js";
@@ -74,7 +80,7 @@ export async function maybeProactiveExpand(
   let restored = 0;
   for (const { entry, overlap } of toRestore) {
     const annotation = formatRestoration(entry, overlap);
-    if (annotateToolOutput(messages, entry.hash, annotation)) {
+    if (annotateLastUserMessage(messages, entry.hash, annotation)) {
       restored++;
     }
   }
@@ -107,36 +113,26 @@ function formatRestoration(
 }
 
 /**
- * Find the tool output message containing the given CCR hash
- * and append the restoration annotation.
+ * Append the restoration to the LAST USER MESSAGE and return whether it landed.
+ *
+ * Returns false when this restoration is already present: the transform runs
+ * once per request inside a tool loop, so appending unconditionally would
+ * duplicate the annotation and churn the very bytes it exists to protect.
  */
-function annotateToolOutput(
+function annotateLastUserMessage(
   messages: MessageLike[],
   hash: string,
   annotation: string,
 ): boolean {
-  const marker = `deep_expand("${hash}")`;
+  const marker = `[auto-restored:${hash}]`;
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    if (!msg.parts) continue;
-    for (const part of msg.parts) {
-      if (part.type !== "tool") continue;
-      // The tool output may be in a 'state' sub-object
-      const stateObj = (part as Record<string, unknown>)["state"] as Record<string, unknown> | undefined;
-      if (stateObj && typeof stateObj["output"] === "string") {
-        const output = stateObj["output"] as string;
-        if (output.includes(hash) || output.includes(marker)) {
-          // Found the compressed output — append restoration
-          stateObj["output"] = output + annotation;
-          return true;
-        }
-      }
-      // Or the text part itself might contain the hash
-      if (typeof part.text === "string" && part.text.includes(hash)) {
-        part.text += annotation;
-        return true;
-      }
+    if (msg.info?.role !== "user" || !msg.parts) continue;
+    if (msg.parts.some((part) => typeof part.text === "string" && part.text.includes(marker))) {
+      return false;
     }
+    msg.parts.push({ type: "text", text: `${marker}${annotation}` });
+    return true;
   }
   return false;
 }

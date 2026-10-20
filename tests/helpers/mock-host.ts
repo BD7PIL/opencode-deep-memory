@@ -90,34 +90,113 @@ export async function withTempProject<T>(
   }
 }
 
-/** Minimal v2 setup ctx — only the faces v2Setup touches. Records every
- *  registration (with the hook event name for session faces) and hands each
- *  registration its own dispose spy, so tests can assert registration and
- *  disposal without hand-rolling the bag. */
-export function mockV2Ctx(opts: { directory?: string; session?: Record<string, unknown> } = {}) {
-  const registered: Array<{ face: string; event?: string; handler: unknown }> = [];
+/**
+ * v2 setup ctx modelling the REAL 2.0.32 runtime faces.
+ *
+ * Deliberately richer than the published `PluginContext` type, which omits
+ * `session`, `tool`, `event`, `storage` and `location` entirely. A mock built
+ * from those published types is what let four silent v2 defects ship in 0.15.x:
+ * no tool ever registered, `tool.hook("*")` never fired, `event.subscribe` was
+ * handed a callback instead of being consumed as an AsyncIterable, and no
+ * appended system part was ever checked for settling.
+ *
+ * Every registration here is drivable, tools added by the plugin land in
+ * `toolRegistry`, and `subscribe` returns an AsyncIterable plus records the
+ * AbortSignal so tests can assert abort-on-dispose.
+ */
+export interface MockV2Registered {
+  face: string;
+  event?: string;
+  handler?: unknown;
+  dispose: ReturnType<typeof vi.fn>;
+}
+
+export interface MockV2Host {
+  ctx: Record<string, unknown>;
+  registered: MockV2Registered[];
+  /** Dispose spies for registrations that are torn down via Registration.dispose. */
+  disposeSpies: Array<ReturnType<typeof vi.fn>>;
+  /** AbortSignals handed to event.subscribe (assert aborted on dispose). */
+  signals: AbortSignal[];
+  /** Tools the plugin added, keyed by effective id `${namespace}_${name}`. */
+  toolRegistry: Map<string, Record<string, unknown>>;
+  handlerFor(face: string, event?: string): ((...args: any[]) => unknown) | undefined;
+}
+
+export function mockV2Ctx(
+  opts: {
+    directory?: string;
+    session?: Record<string, unknown>;
+    /** v2 events replayed to every event.subscribe consumer. */
+    events?: Array<Record<string, unknown>>;
+    /** Omit the agent face to model a reduced (TUI-embedded) host. */
+    reducedHost?: boolean;
+  } = {},
+): MockV2Host {
+  const registered: MockV2Registered[] = [];
   const disposeSpies: Array<ReturnType<typeof vi.fn>> = [];
-  const tracked = () => {
-    const d = vi.fn();
-    disposeSpies.push(d);
-    return { dispose: d };
+  const signals: AbortSignal[] = [];
+  const toolRegistry = new Map<string, Record<string, unknown>>();
+
+  const track = (): { dispose: ReturnType<typeof vi.fn> } => {
+    const dispose = vi.fn();
+    disposeSpies.push(dispose);
+    return { dispose };
   };
-  const hook = (face: string) => (event: string, handler: unknown) => {
-    registered.push({ face, event, handler });
-    return tracked();
+  /** Registration with a dispose spy the disposer is expected to call. */
+  const record = (face: string, event: string | undefined, handler: unknown, dispose: ReturnType<typeof vi.fn>) => {
+    registered.push({ face, event, handler, dispose });
+    return dispose;
   };
+  const hook = (face: string) => (event: string, handler: unknown) =>
+    ({ dispose: record(face, event, handler, track().dispose) });
+
+  const eventFeed = opts.events ?? [];
   const ctx: Record<string, unknown> = {
-    app: { version: "0.0.0-mock" },
-    location: { directory: opts.directory ?? process.cwd() },
-    agent: { transform: () => {} },
+    app: { name: "cli", version: "2.0.32-mock", channel: "latest" },
+    location: { directory: opts.directory ?? process.cwd(), project: { id: "global" } },
+    options: {},
     session: { hook: hook("session"), ...(opts.session ?? {}) },
-    tool: { hook: hook("tool") },
+    tool: {
+      hook: hook("tool"),
+      async transform(callback: (editor: unknown) => void) {
+        record("tool", "transform", callback, vi.fn());
+        const editor = {
+          list: () => [...toolRegistry.values()],
+          get: (id: string) => toolRegistry.get(id),
+          namespace: vi.fn(),
+          add: (tool: Record<string, unknown>) => {
+            // The real registry is keyed by effective name, so a re-add replaces.
+            const namespace = (tool["options"] as { namespace?: string } | undefined)?.namespace;
+            toolRegistry.set(`${namespace}_${String(tool["name"])}`, tool);
+          },
+          update: vi.fn(),
+          remove: vi.fn(),
+        };
+        callback(editor);
+        return { dispose: vi.fn() };
+      },
+    },
     event: {
-      subscribe: (handler: unknown) => {
-        registered.push({ face: "event", handler });
-        return tracked();
+      subscribe(o?: { signal?: AbortSignal }) {
+        if (o?.signal) signals.push(o.signal);
+        // The real face has no dispose(): teardown is the AbortSignal, so this
+        // registration deliberately carries no dispose spy.
+        record("event", "subscribe", undefined, vi.fn());
+        return {
+          async *[Symbol.asyncIterator]() {
+            for (const event of eventFeed) yield event;
+          },
+        };
       },
     },
   };
-  return { ctx, registered, disposeSpies };
+  if (!opts.reducedHost) ctx["agent"] = { transform: () => {} };
+
+  const handlerFor = (face: string, event?: string) =>
+    registered.find((r) => r.face === face && (event === undefined || r.event === event))?.handler as
+      | ((...args: any[]) => unknown)
+      | undefined;
+
+  return { ctx, registered, disposeSpies, signals, toolRegistry, handlerFor };
 }

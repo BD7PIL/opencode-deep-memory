@@ -25,6 +25,15 @@ const KEEP_RECENT = 8;
 /** C1: First N messages are never touched (system prompt + first user + first assistant). */
 const PROTECTED_HEAD = 3;
 
+/**
+ * Stable per-kind nudge markers. These are prefixes of the rendered nudge text
+ * and exist so the idempotency guard above survives the token count embedded in
+ * the emergency/threshold messages changing between turns.
+ */
+const NUDGE_MARKER_POSTCOMPACT = "[context was compacted";
+const NUDGE_MARKER_EMERGENCY = "[context at emergency level";
+const NUDGE_MARKER_THRESHOLD = "[context at ";
+
 const SYSTEM_INJECTION_PATTERNS = [
   /^$/,
   /^<!-- OMO_INTERNAL_INITIATOR -->$/,
@@ -261,18 +270,9 @@ export function createMessagesTransformHandler(
         }
       }
 
-      // Inject summary block as assistant message at cutoff position
       if (compressReq.summary) {
-        const summaryMsg = {
-          info: { role: "assistant" },
-          parts: [{
-            type: "text",
-            text: `[compressed-block: messages 1-${cutoff}]\n${compressReq.summary}\n[/compressed-block]`,
-          }],
-        };
-        messages.splice(cutoff, 0, summaryMsg as never);
-
-        // Mark old assistant messages in compressed zone
+        // Mark old assistant messages in the compressed zone FIRST, so the
+        // summary insert can be placed based on what the pass actually did.
         for (let i = 2; i < cutoff; i++) {
           const msg = messages[i] as { info: { role: string }; parts: unknown[] } | undefined;
           if (!msg?.parts) continue;
@@ -287,6 +287,34 @@ export function createMessagesTransformHandler(
             p["text"] = `[compressed — call deep_expand("${hash}") to restore original]`;
             compressed++;
           }
+        }
+
+        const summaryMsg = {
+          info: { role: "assistant" },
+          parts: [{
+            type: "text",
+            text: `[compressed-block: messages 1-${cutoff}]\n${compressReq.summary}\n[/compressed-block]`,
+          }],
+        };
+
+        // Placement is measured, not assumed —
+        // see scripts/measure-summary-placement.mts and docs/research/stage4-cache-work.md.
+        //
+        // When this pass rewrote anything, splicing at `cutoff` costs exactly
+        // nothing: the divergence point is set by the rewrites just above, not by
+        // the insert, so the ordered placement is free — and order is the reason
+        // the block exists.
+        //
+        // When this pass rewrote nothing, the insert is the ONLY mutation, and a
+        // mid-array splice re-prefilled the entire retained tail (8 messages /
+        // 656 chars measured). Appending costs zero. Ordering is moot in that
+        // case: with no compressed block, there is nothing for the summary to
+        // precede.
+        if (compressed > 0) {
+          messages.splice(cutoff, 0, summaryMsg as never);
+        } else {
+          messages.push(summaryMsg as never);
+          logger?.debug("messages.transform: summary appended (pass compressed nothing)");
         }
       }
 
@@ -350,6 +378,17 @@ export function createMessagesTransformHandler(
       }
 
       if (nudgeText) {
+        // Idempotency guard: the transform runs once per request, so without a
+        // stable marker the emergency nudge re-appended itself to the same tool
+        // output on every request — growing that output without bound and
+        // rewriting the tail every turn. The marker is per nudge KIND (not the
+        // rendered text, which embeds a changing token count), so a new tool
+        // output still gets a fresh nudge while a stable one gets exactly one.
+        const nudgeMarker = postCompactNudge
+          ? NUDGE_MARKER_POSTCOMPACT
+          : estimated >= NUDGE_EMERGENCY_TOKENS
+            ? NUDGE_MARKER_EMERGENCY
+            : NUDGE_MARKER_THRESHOLD;
         for (let i = messages.length - 1; i >= 0; i--) {
           const msg = messages[i] as { info: { role: string }; parts: unknown[] } | undefined;
           if (!msg?.parts) continue;
@@ -357,11 +396,13 @@ export function createMessagesTransformHandler(
             const p = part as Record<string, unknown>;
             const toolState = p["state"] as Record<string, unknown> | undefined;
             if (p["type"] === "tool" && toolState && typeof toolState["output"] === "string") {
-              toolState["output"] += nudgeText;
-              logger?.debug("messages.transform: nudge injected", {
-                type: postCompactNudge ? "postcompact" : estimated >= NUDGE_EMERGENCY_TOKENS ? "emergency" : "threshold",
-                tokens: estimated,
-              });
+              if (!(toolState["output"] as string).includes(nudgeMarker)) {
+                toolState["output"] += nudgeText;
+                logger?.debug("messages.transform: nudge injected", {
+                  type: postCompactNudge ? "postcompact" : estimated >= NUDGE_EMERGENCY_TOKENS ? "emergency" : "threshold",
+                  tokens: estimated,
+                });
+              }
               break;
             }
           }
