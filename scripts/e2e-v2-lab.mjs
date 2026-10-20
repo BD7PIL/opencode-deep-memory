@@ -42,8 +42,8 @@ import { fileURLToPath } from "node:url";
 const REPO = dirname(dirname(fileURLToPath(import.meta.url)));
 const VERSION = process.env["E2E_V2_VERSION"] ?? "2.0.32";
 const LAB = join(tmpdir(), `dm-e2e-v2-${VERSION.replace(/\./g, "_")}`);
-const ENGINE_PORT = 4799;
-const STUB_PORT = 4711;
+const ENGINE_PORT = Number(process.env["E2E_V2_ENGINE_PORT"] ?? 4799);
+const STUB_PORT = Number(process.env["E2E_V2_STUB_PORT"] ?? 4711);
 const PASSWORD = "dm-e2e-v2-password";
 const KEEP = process.argv.includes("--keep");
 
@@ -600,12 +600,12 @@ async function main() {
     const steady = withBlock.slice(1).filter((record, index) => record.blockHash === withBlock[index].blockHash);
     const worst = steady.length ? Math.min(...steady.map((record) => record.reuseRatio)) : 0;
     console.log(`      whole-prefix reuse min in steady state: ${worst.toFixed(3)} over ${steady.length} requests (harness system prompt also moves it)`);
-    comparable.forEach((record, index) =>
+    comparable.forEach((record, index) => {
       console.log(
         `      req${index}: reuse=${record.reuseRatio.toFixed(3)} systemChars=${record.systemChars} ` +
           `blockChars=${record.blockChars} blockChanged=${index > 0 && record.blockHash !== comparable[index - 1].blockHash}`,
-      ),
-    );
+      );
+    });
     console.log(`      MEMORY.md after each turn: ${memorySizes.join(" -> ")}`);
 
     console.log("\n-- v2 event name mapping");

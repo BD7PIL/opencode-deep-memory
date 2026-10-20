@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "name": "opencode-deep-memory",
-  "version": "0.16.3",
+  "version": "0.16.4",
   "license": "MIT",
   "host": {
     "node": ">=20",
@@ -9,7 +9,7 @@
     "arch": ["x64", "arm64"]
   },
   "enginePlugin": {
-    "spec": "@bd7pil/opencode-deep-memory@0.16.3",
+    "spec": "@bd7pil/opencode-deep-memory@0.16.4",
     "kind": "package",
     "entry": "~/.ocrc/components/opencode-deep-memory/node_modules/@bd7pil/opencode-deep-memory",
     "requiresPeer": []

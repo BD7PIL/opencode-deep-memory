@@ -41,10 +41,10 @@ jobs:
           T="$(npm pack --silent | tail -1)"
           echo "tarball: $T"
           tar -tzf "$T" > /tmp/tar-list.txt
-          for f in package/dist/index.js package/index.js package/provision.json; do
+          for f in package/dist/index.js package/index.js package/provision.json package/THIRD-PARTY.md; do
             grep -qx "$f" /tmp/tar-list.txt || { echo "::error::missing $f"; exit 1; }
           done
-          echo "tarball ships dist, the directory entry and provision.json"
+          echo "tarball ships dist, the directory entry, provision.json and THIRD-PARTY.md"
 
       - name: Publish
         run: npm publish --provenance --access public

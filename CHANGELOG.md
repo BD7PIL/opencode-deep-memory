@@ -1,3 +1,32 @@
+# 0.16.4 — open-source hygiene, bundled-dependency notice, Windows tests
+
+## Added
+
+- **`THIRD-PARTY.md`** with the MIT license text of **zod 4.1.8**, which is
+  compiled into `dist/` (`tsup` `noExternal`). The file is listed in
+  `package.json#files` and asserted by the publish workflow — a bundled
+  dependency is redistributed, so its notice must ship.
+- `SECURITY.md` (data handling: memory files contain conversation excerpts),
+  `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue/PR templates and Dependabot.
+- `package.json` now declares `homepage` and `bugs`.
+
+## Fixed
+
+- The five Windows-only failures in `tests/shared/paths.test.ts`: assertions
+  compared `path.join` output against POSIX literals (`/proj`). They now use
+  `resolve(...)` / `join(...)` so the suite is green on Windows and POSIX.
+
+## Tooling
+
+- Biome lint-only gate (`npm run lint`), formatting deliberately not enforced;
+  it is part of `verify` and runs in CI.
+- CI reports coverage (`npm run test:coverage`); no threshold yet.
+- `e2e:v2` stub/engine ports are overridable (`E2E_V2_STUB_PORT`,
+  `E2E_V2_ENGINE_PORT`) so the gate can run on a machine where 4711 is already
+  held by an unrelated local service.
+
+No runtime behaviour change.
+
 # 0.16.3 — loadable as a directory, and a declaration a provisioner can read
 
 ## Added

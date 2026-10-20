@@ -23,6 +23,12 @@ jobs:
 
       - run: npm install
 
+      - name: Lint (biome, lint-only — formatting is not enforced)
+        run: npm run lint
+
+      - name: Public-tree gate (private addresses / developer paths / credential shapes)
+        run: node scripts/check-public-tree.mjs --root . --exclude .zcode --exclude coverage
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -34,6 +40,11 @@ jobs:
 
       - name: Test
         run: npm test
+
+      # Report only: no threshold yet. The number is here so coverage drift is
+      # visible in every run instead of being discovered during a release.
+      - name: Coverage report (no threshold)
+        run: npm run test:coverage
 
       - name: Smoke test
         run: npm run smoke

@@ -245,8 +245,13 @@ Absolute token thresholds (not ratio-based) — Context Rot (Chroma 2025) confir
 
 ```bash
 npm install
-npm run verify   # typecheck + test + build + smoke
+npm run lint      # Biome, lint-only (formatting is not enforced)
+npm run verify    # lint + typecheck + build + test + smoke + e2e
+npm run e2e:v2    # real opencode v2 engine against a stub LLM (38 checks)
 ```
+
+The published tarball bundles zod; its license text ships in
+[THIRD-PARTY.md](THIRD-PARTY.md).
 
 ## What V5 removed (V4 regression)
 

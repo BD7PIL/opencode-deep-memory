@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { join, resolve } from "node:path";
 import {
   projectSubdir,
   resolveGlobalRoot,
@@ -22,11 +23,11 @@ describe("paths: projectSubdir", () => {
 
 describe("paths: resolveGlobalRoot", () => {
   it("uses DEEP_MEMORY_GLOBAL_ROOT when set", () => {
-    expect(resolveGlobalRoot({ DEEP_MEMORY_GLOBAL_ROOT: "/tmp/g" })).toBe("/tmp/g");
+    expect(resolveGlobalRoot({ DEEP_MEMORY_GLOBAL_ROOT: "/tmp/g" })).toBe(resolve("/tmp/g"));
   });
 
   it("uses DEEP_MEMORY_DATA legacy alias when set", () => {
-    expect(resolveGlobalRoot({ DEEP_MEMORY_DATA: "/tmp/legacy" })).toBe("/tmp/legacy");
+    expect(resolveGlobalRoot({ DEEP_MEMORY_DATA: "/tmp/legacy" })).toBe(resolve("/tmp/legacy"));
   });
 
   it("uses XDG_DATA_HOME when set", () => {
@@ -44,14 +45,15 @@ describe("paths: resolveGlobalRoot", () => {
 
   it("DEEP_MEMORY_GLOBAL_ROOT takes priority over DEEP_MEMORY_DATA", () => {
     expect(resolveGlobalRoot({ DEEP_MEMORY_GLOBAL_ROOT: "/tmp/g", DEEP_MEMORY_DATA: "/tmp/d" }))
-      .toBe("/tmp/g");
+      .toBe(resolve("/tmp/g"));
   });
 });
 
 describe("paths: projectMemoryDir", () => {
   it("joins projectPath with default subdir", () => {
-    const dir = projectMemoryDir("/my/project");
-    expect(dir).toContain("/my/project");
+    const project = join("my", "project");
+    const dir = projectMemoryDir(project);
+    expect(dir).toContain(project);
     expect(dir).toContain(".deep-memory");
   });
 });
@@ -65,8 +67,8 @@ describe("paths: globalMemoryDir", () => {
 
 describe("paths: scopeDir", () => {
   it("returns projectMemoryDir for project scope", () => {
-    const dir = scopeDir("project", "/proj");
-    expect(dir).toContain("/proj");
+    const dir = scopeDir("project", "proj");
+    expect(dir).toContain("proj");
     expect(dir).toContain(".deep-memory");
   });
 

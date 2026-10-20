@@ -166,18 +166,19 @@ export function extractSymbols(
 
   for (const { type, re } of patterns) {
     re.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(content)) !== null) {
+    let m = re.exec(content);
+    while (m !== null) {
       // Group 1 always holds the symbol name for our patterns
       const name = m[1];
-      if (!name) continue;
-
-      const key = `${type}:${name}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-
-      const line = offsetToLine(m.index, lineOffsets);
-      symbols.push({ name, type, line });
+      if (name) {
+        const key = `${type}:${name}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          const line = offsetToLine(m.index, lineOffsets);
+          symbols.push({ name, type, line });
+        }
+      }
+      m = re.exec(content);
     }
   }
 
