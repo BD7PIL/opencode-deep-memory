@@ -22,10 +22,20 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { v2Setup, buildV2Client } from "../../src/v2/entry.js";
 import { appendDebugLine } from "../../src/v2/debug-channel.js";
+import { mockV2Ctx } from "../helpers/mock-host.js";
 
 function tempProject(): string {
   return mkdtempSync(join(tmpdir(), "dm-cache-"));
 }
+
+/**
+ * deepMemoryPlugin memoizes its hooks on globalThis, which is deliberate
+ * idempotency in production (a v2 engine can load the plugin twice, once per
+ * worker context) but would leak one test's project directory into the next.
+ */
+beforeEach(() => {
+  delete (globalThis as Record<string, unknown>)["__deepMemoryCachedHooks"];
+});
 
 describe("invariant 1 — messages.transform idempotency", () => {
   it("second pass over the same array is byte-identical", async () => {
@@ -63,38 +73,75 @@ describe("invariant 1 — messages.transform idempotency", () => {
   });
 });
 
-describe("invariant 2 — context hook sync safety", () => {
-  it("v2Setup context handler completes mutation with no await points before it", async () => {
+describe("invariant 2 — injected system block is byte-stable across turns", () => {
+  const MEMORY = "# Project Memory\n\n## Gotchas\n- byte-stability anchor [2026-10-20]\n";
+
+  /**
+   * 0.15.x asserted a *sync* context handler because the 2.0.27 spike found
+   * post-await mutations were lost. On 2.0.32 the host awaits the handler, so
+   * the invariant that matters is the cache one: an unchanged MEMORY.md must
+   * yield a byte-identical injected block, and a MEMORY.md write must move
+   * exactly one turn.
+   */
+  it("unchanged MEMORY.md → identical block; a write moves exactly one turn", async () => {
     const project = tempProject();
     try {
-      const registered: Record<string, (...args: unknown[]) => unknown> = {};
-      const ctx = {
-        location: { directory: project },
-        session: {
-          async hook(name: string, handler: (e: unknown) => unknown) { registered[name] = handler; return { dispose() {} }; },
-          async create() { return { id: "ses_x" }; },
-          async prompt() { return {}; },
-        },
-        event: { subscribe(h: (e: unknown) => unknown) { registered["event"] = h; return { dispose() {} }; } },
-        tool: { async hook(n: string, h: (e: unknown, o: unknown) => unknown) { registered["tool"] = h; return { dispose() {} }; } },
+      mkdirSync(join(project, ".deep-memory"), { recursive: true });
+      writeFileSync(join(project, ".deep-memory", "MEMORY.md"), MEMORY);
+      const host = mockV2Ctx({ directory: project });
+      await v2Setup(host.ctx as never);
+      const context = host.handlerFor("session", "context")!;
+
+      const turn = async (): Promise<string> => {
+        const event = {
+          sessionID: "ses_stab",
+          agent: "build",
+          model: { id: "m", providerID: "p" },
+          system: [{ type: "text", text: "base prompt" }],
+          messages: [{ id: "m1", role: "user", content: [{ type: "text", text: "q" }] }],
+        };
+        await context(event);
+        return JSON.stringify(event.system);
       };
-      // agent face must exist (reduced-host guard)
-      (ctx as unknown as Record<string, unknown>).agent = { transform: () => {} };
 
-      const disposer = await v2Setup(ctx as never);
-      expect(typeof disposer).toBe("function");
-      expect(registered["context"]).toBeTruthy();
+      const stable = await turn();
+      expect(await turn()).toBe(stable);
 
-      // Simulate the host's fire-and-forget: call the handler, then IMMEDIATELY
-      // (same microtask, no awaits) snapshot the event. The mutation the host
-      // would see must already be present or absent deterministically — the
-      // handler must never leave the event half-mutated across an await.
-      const event = { sessionID: "ses_t", system: [{ type: "text", text: "base" }], messages: [] as unknown[] };
-      const returned = (registered["context"] as (e: typeof event) => typeof event)(event);
-      // Synchronous contract: the handler returns the (same) event object.
-      expect(returned).toBe(event);
-      // No half-state: system blocks are all well-formed {type,text}.
-      for (const b of event.system) expect(typeof b.text).toBe("string");
+      // A MEMORY.md write is the one legitimate change. Bump the clock so the
+      // mtime cache is guaranteed to notice, rather than relying on write
+      // ordering within the same millisecond.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      writeFileSync(join(project, ".deep-memory", "MEMORY.md"), MEMORY + "- added line [2026-10-20]\n");
+      const changed = await turn();
+      expect(changed).not.toBe(stable);
+
+      const restabilized = await turn();
+      expect(restabilized).toBe(changed);
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * Tool definitions precede every system and message block in the provider
+   * prefix, so any churn there invalidates everything downstream.
+   */
+  it("tool definitions are byte-stable and identically ordered across host reloads", async () => {
+    const project = tempProject();
+    try {
+      mkdirSync(join(project, ".deep-memory"), { recursive: true });
+      writeFileSync(join(project, ".deep-memory", "MEMORY.md"), MEMORY);
+
+      delete (globalThis as Record<string, unknown>)["__deepMemoryCachedHooks"];
+      const first = mockV2Ctx({ directory: project });
+      await v2Setup(first.ctx as never);
+      const snapshot = JSON.stringify([...first.toolRegistry.keys()]);
+
+      delete (globalThis as Record<string, unknown>)["__deepMemoryCachedHooks"];
+      const second = mockV2Ctx({ directory: project });
+      await v2Setup(second.ctx as never);
+      expect(JSON.stringify([...second.toolRegistry.keys()])).toBe(snapshot);
+      expect(snapshot.length).toBeGreaterThan(2);
     } finally {
       rmSync(project, { recursive: true, force: true });
     }
@@ -141,11 +188,12 @@ describe("v2 client adapter", () => {
   it("normalizes v2 flat message lists into the v1 {info, parts} shape", async () => {
     const ctx = {
       session: {
-        async messages() {
+        // v2 exposes no session.messages; the read face is session.context.
+        async context() {
           return {
             data: [
-              { id: "m1", role: "user", sessionID: "s1", content: [{ type: "text", text: "hi" }] },
-              { id: "m2", role: "assistant", sessionID: "s1", content: ["plain string part"] },
+              { id: "m1", type: "user", text: "hi" },
+              { id: "m2", type: "assistant", content: [{ type: "text", text: "plain string part" }] },
             ],
           };
         },

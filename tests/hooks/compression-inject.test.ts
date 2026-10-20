@@ -156,7 +156,7 @@ describe("maybeProactiveExpand (direct)", () => {
     }], id);
   }
 
-  it("restores matching CCR content when the user query overlaps its entities", async () => {
+  it("restores into the LAST USER MESSAGE and leaves compressed history untouched", async () => {
     // Entity extraction only recognizes file names / func() / versions /
     // PascalCase — so both sides must carry the same such tokens.
     const original = "The Postgres-Migration for orders.test.json needs CustomerID index v1.2.3, migrateDb() uses deploy.sh — Postgres-Migration orders.test.json CustomerID " + "detail ".repeat(40);
@@ -169,9 +169,43 @@ describe("maybeProactiveExpand (direct)", () => {
 
     const restored = await maybeProactiveExpand(state, messages as never);
     expect(restored).toBe(1);
-    const out = (messages[0].parts as Array<{ state: { output: string } }>)[0].state.output;
-    expect(out).toContain("[auto-restored");
-    expect(out).toContain("CustomerID");
+
+    // CACHE DISCIPLINE: the compressed tool output sits mid-history, so
+    // annotating it in place would invalidate every message after it — up to the
+    // whole conversation — to inject at most 3 KB. It must stay untouched.
+    const toolOut = (messages[0].parts as Array<{ state: { output: string } }>)[0].state.output;
+    expect(toolOut).not.toContain("[auto-restored");
+
+    // The restoration rides the tail instead, where the only bytes that must be
+    // prefilled are the bytes actually added.
+    const userText = (messages[1].parts as Array<{ text?: string }>)
+      .map((part) => part.text ?? "")
+      .join("\n");
+    expect(userText).toContain("[auto-restored");
+    expect(userText).toContain(`[auto-restored:${hash}]`);
+    expect(userText).toContain("CustomerID");
+  });
+
+  it("is idempotent: a pass that finds the marker already present adds nothing", async () => {
+    // The transform runs once per request inside a tool loop, so a repeated
+    // pass must not duplicate the annotation and churn the tail it protects.
+    const original = "The Postgres-Migration for orders.test.json needs CustomerID index v1.2.3, migrateDb() uses deploy.sh — Postgres-Migration orders.test.json CustomerID " + "detail ".repeat(40);
+    const compressed = "[compressed output]\ndeep_expand call available";
+    const hash = ccrStore(state, original, compressed, "bash");
+    const messages = [
+      toolMsgWithOutput("t1", compressed + `\n[compressed — call deep_expand("${hash}") to restore original]`),
+      mockMessage("user", [{ type: "text", text: "Postgres-Migration orders.test.json CustomerID migrateDb() status?" }]),
+    ];
+
+    expect(await maybeProactiveExpand(state, messages as never)).toBe(1);
+    const snapshot = JSON.stringify(messages);
+
+    // A fresh state has no throttle recorded, so this pass really does reach the
+    // marker check (otherwise the 3s throttle would mask the guard).
+    const unthrottled = createPluginState();
+    ccrStore(unthrottled, original, compressed, "bash");
+    expect(await maybeProactiveExpand(unthrottled, messages as never)).toBe(0);
+    expect(JSON.stringify(messages)).toBe(snapshot);
   });
 
   it("below-threshold overlap restores nothing", async () => {

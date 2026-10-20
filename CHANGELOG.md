@@ -1,3 +1,98 @@
+# 0.16.0 — opencode v2 re-adaptation on 2.0.32 + prompt-cache work
+
+Re-verified the whole v2 adapter against a real **opencode 2.0.32** engine and
+rebuilt it around what the engine actually does. The 0.15.0 adapter was written
+against a 2.0.27 spike whose central premise does not reproduce on 2.0.32.
+Evidence for every change: `docs/research/v2-032-respike.md`.
+
+## Fixed (v2 — each of these was silently broken on a real v2 host)
+
+- **Memory tools never reached the model.** The adapter called the v1 `tool`
+  map as if it were a function; the v2 registry takes `ctx.tool.transform(editor
+  => editor.add(...))` with a **required** `options.namespace`, without which a
+  tool lands in the registry but not the agent's tool list. All seven tools now
+  register. The v1 key is split on its first underscore (`memory_search` →
+  namespace `memory` + name `search`) so the model still sees the bare names the
+  frozen TOOL_HINT refers to.
+- **`tool.execute.after` never fired.** `ctx.tool.hook("*")` is not a valid v2
+  hook name; the only names are `execute.before` / `execute.after`. Repomap
+  read-tracking and stale-read edit-tracking work again.
+- **Every event was dropped.** `ctx.event.subscribe` returns an AsyncIterable,
+  not a callback registration — the returned iterable was never consumed. On top
+  of that, v2 emits **no `session.idle` and no `session.compacted`**; those are
+  now mapped from `session.execution.succeeded` and `session.compaction.started`.
+  This restores idle-triggered memory consolidation (the primary consolidation
+  path), compaction pressure calibration, the compaction audit log and
+  `session.deleted` cleanup.
+- **`bestModel()` was always undefined**, so the consolidation sub-session was
+  spawned with no model: `chat.params` is bridged onto the `context` payload,
+  which is the only place v2 exposes agent/model.
+- **Compaction capture needed no fetch** — v2 hands the full message list to the
+  `compaction` hook. The `client.session.messages` path is gone (that method does
+  not exist on v2) and the read face is now `ctx.session.context`.
+- **The read face is parsed correctly**: v2 tags entries `user` / `assistant` /
+  `idle` / `compaction`. Non-conversational markers are dropped, because both v1
+  call sites require the LAST entry to be an assistant message and a v2 list ends
+  with an `idle` marker.
+
+## Changed (v2 — cache profile)
+
+- **The byte-stable memory block moved from the last user message back into a
+  system part.** On 2.0.32 the host awaits `context` handlers and appended system
+  parts do settle into the request, so the block joins the cached prefix instead
+  of paying a boundary miss per turn. Appending also lands the auto cache
+  breakpoint right after it, so no explicit `CacheHint` is set — manual hints
+  count against the same four-breakpoint budget.
+- **The disk warm-cache handoff is deleted** (`.deep-memory/.v2-warm-cache.json`,
+  `warmBySession`, `applyMessages`). It existed only to work around mutations
+  being lost across an `await`, which does not happen on 2.0.32; it also
+  overwrote message content wholesale from the previous turn's snapshot.
+- **Messages the bridge does not modify are returned by identity**, so an
+  unchanged history stays byte-identical for the cache prefix.
+
+## Fixed (v1 — pre-existing)
+
+- **The once-per-session auto-search whisper was unreachable.**
+  `state.consumeLastUserText()` was called by the system transform but nothing in
+  `src/` ever called `recordLastUserText`. A new `chat.message` handler records
+  the user's text; v2 feeds it from its `prompt` hook.
+- **The proactive-expansion annotation was a cache bomb.** It appended up to
+  3 KB of restored content to the compressed tool output it referred to — a part
+  sitting mid-history, so the mutation invalidated every message after it. It now
+  rides the last user message, bounding the cost to the bytes actually added, and
+  is idempotent across the requests of one tool loop.
+- **Nudge injection was not idempotent.** Without a stable marker the emergency
+  nudge re-appended itself to the same tool output on every request, growing that
+  output without bound and rewriting the tail each turn. Guarded by a per-kind
+  marker prefix (the rendered text embeds a changing token count, so it cannot
+  mark itself).
+
+## Added
+
+- `scripts/e2e-v2-lab.mjs` (`npm run e2e:v2`) — a real-engine gate that installs
+  opencode v2, boots it in an isolated HOME against a stub LLM, and asserts tool
+  visibility, tool execution, system-part settling, event-name mapping,
+  compaction artifacts and prefix reuse. Wired into CI.
+- `src/v2/v2-types.ts`, `src/v2/event-map.ts`, `src/v2/tool-bridge.ts` — the
+  adapter split into the contract, the event vocabulary mapping and the tool
+  conversion, with the v2 types vendored from `@opencode/plugin@2.0.32` (the
+  published `PluginContext` omits 17 of the 26 faces the runtime hands over).
+- `docs/research/v2-032-respike.md` — per-field evidence for every claim above.
+- `docs/research/community-memory-plugins-2026-10.md` — survey of 20+ opencode
+  memory/context plugins and the prompt-cache techniques they document.
+
+## Removed
+
+- `.deep-memory/.v2-warm-cache.json` from the documented storage layout.
+
+## Tests
+
+478 → 493 unit tests. New coverage: tool registration and naming, the JSON
+Schema conversion, `execute.after` payload mapping, event-name normalization,
+system-part byte stability across turns and across host reloads, tool-definition
+ordering stability, the compaction mapping, `buildV2Client` over the real read
+face, and nudge idempotency.
+
 # 0.15.1 — tech-debt cleanup + test hardening
 
 No API or behavior changes (except one real bug fix). Every gate re-verified:

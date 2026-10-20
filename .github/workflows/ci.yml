@@ -39,3 +39,18 @@ jobs:
       # the real-E2E regression script is the gatekeeper and belongs in CI.
       - name: Real-bug regression (v0.14.1 trio)
         run: npm run e2e:real-bugs
+
+      # The v2 adapter's contract lives in the ENGINE, not in the published SDK
+      # types: tools only reach the agent through ctx.tool.transform with a
+      # namespace, events arrive as an AsyncIterable, and v2's event names differ
+      # from v1's. A mocked host cannot disagree with the adapter's assumptions,
+      # so this gate boots a real opencode v2 engine against a stub LLM.
+      # Bump this cache key whenever E2E_V2_VERSION changes.
+      - name: Cache the opencode v2 engine
+        uses: actions/cache@v4
+        with:
+          path: /tmp/dm-e2e-v2-*
+          key: opencode-v2-engine-${{ runner.os }}-2.0.32
+
+      - name: v2 real-engine E2E gate
+        run: npm run e2e:v2

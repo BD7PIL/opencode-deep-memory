@@ -4,21 +4,47 @@
 
 V5.1 architecture: three-layer optimization — deterministic noise reduction, intelligent context compression (main-agent-triggered + subagent-executed), and increment-based memory consolidation. Built on research from 7 production coding agents, 30+ memory systems, and 5 academic papers.
 
-## opencode v2 support (0.15.0+)
+## opencode v2 support
 
-The plugin ships a **dual-form entry**: hosts on either plugin contract load it from the same package.
+opencode v2 is a **separate release line under a different npm scope** (`@opencode/*`;
+the v1 line is `@opencode-ai/*`). The plugin ships a **dual-form entry**, so a host
+on either contract loads it from the same package.
 
 | Host | Entry | Behavior |
 |---|---|---|
-| opencode 1.18.x (v1 `plugin` key) | default export | Full hook set: system.transform, messages.transform, compacting, event, tools |
-| opencode 2.x (v2 `plugins` key) | `{ id, setup }` | Setup-registers faces via `ctx.*.hook`; warm-cache + last-user-message injection (see below) |
+| opencode 1.18.x+ (v1 `plugin` key) | default export | Full hook set: system.transform, messages.transform, compacting, event, chat.message, tools |
+| opencode 2.x (`plugins` key) | `{ id, setup }` | `setup` registers the same hooks on the v2 faces and returns a disposer |
+
+The adapter is verified against a real **opencode 2.0.32** engine by `npm run e2e:v2`,
+which CI runs on every push. The 2.0.27 findings 0.15.0 was built on are superseded —
+see [docs/research/v2-032-respike.md](docs/research/v2-032-respike.md) for the
+per-field evidence.
 
 v2 differences worth knowing:
 
-- **Injection channel**: v2 does not await `context` hook handlers (async mutations are lost), and `system[]` mutations are unreliable. The v2 adapter therefore rides the **last user message** — the byte-stable memory block is appended as a `<deep-memory-context>` text part. Cache profile: one miss per rewritten message, stable prefix otherwise.
-- **Warm-cache handoff**: the async system-refresh result is persisted to `.deep-memory/.v2-warm-cache.json`, so the next turn (or a new session in the same project) applies it synchronously without re-running the async transform.
-- **Compaction**: bridged via `ctx.session.hook("compaction")` with the v1 `{context, prompt}` output mapping; checkpoint capture works unchanged.
-- **Diagnostics**: set `DEEP_MEMORY_DEBUG=1` and check `.deep-memory/` for the debug channel.
+- **Injection channel**: the byte-stable memory block rides an appended **system
+  part**. v2 awaits `context` handlers before assembling the request and appended
+  system parts settle, so the block joins the cached prefix rather than paying a
+  boundary miss on every turn. Measured on the lab engine: prefix reuse **0.996** in
+  steady state, and a `memory_store` write costs exactly **one** re-prefill. No
+  explicit cache hint is set — appending already lands the automatic breakpoint right
+  after the block, and manual hints spend one of the same four slots.
+- **Event names differ.** v2 emits no `session.idle` and no `session.compacted`; the
+  adapter maps `session.execution.succeeded` → `session.idle` and
+  `session.compaction.started` → `session.compacted`, so idle consolidation, pressure
+  calibration, the compaction audit log and `session.deleted` cleanup all work.
+- **Tools** reach the agent only through `ctx.tool.transform(...)` with a required
+  `options.namespace`. The adapter splits each v1 tool key on its first underscore
+  (`memory_search` → namespace `memory` + name `search`), so the model still sees the
+  bare names the frozen TOOL_HINT refers to.
+- **Compaction** is bridged via `ctx.session.hook("compaction")`. v2 hands over the
+  full message list, so checkpoint capture needs no client fetch, and the v1
+  `{context}` output is appended to `event.system`.
+- **Registration**: add it to the v2 `plugins` array pointing at a **directory** (the
+  host resolves `<dir>/index.js` and ignores `package.json` main). A v2 engine also
+  still reads the v1 `plugin` key, but `plugins` is the supported one.
+- **Diagnostics**: `DEEP_MEMORY_DEBUG=1` logs every registration, injection and
+  event mapping.
 
 ## Quick start
 
@@ -175,7 +201,6 @@ No background LLM sessions, no `client.session.promptAsync` fire-and-forget, no 
 ├── .compaction-log.jsonl      compaction audit trail
 ├── .index-state.json          BM25 index mtime tracker
 ├── .pending-consolidation.json   persistent LLM subagent state (survives restarts)
-├── .v2-warm-cache.json        v2 host: async refresh result handed to the next turn
 └── .tool-outputs/             captured tool outputs (offline noise reduction)
 ```
 
