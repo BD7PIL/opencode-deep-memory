@@ -247,6 +247,7 @@ Absolute token thresholds (not ratio-based) — Context Rot (Chroma 2025) confir
 npm install
 npm run lint      # Biome, lint-only (formatting is not enforced)
 npm run verify    # lint + typecheck + build + test + smoke + e2e
+npm run test:coverage   # coverage with a hard floor (vitest.config.ts thresholds, only ratchets up)
 npm run e2e:v2    # real opencode v2 engine against a stub LLM (38 checks)
 ```
 
