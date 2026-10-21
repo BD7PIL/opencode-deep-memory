@@ -22,7 +22,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [20]
+        # 24 = 主线统一线：门槛锚定、重 E2E、本机开发机与引擎实跑都在这条
+        # （EL7 上引擎跑的 node 也是 24.22）；20 = engines 地线兼容腿
+        # （package.json engines >=20），只跑单元测试，不锚覆盖率。
+        node-version: [20, 24]
 
     steps:
       - uses: actions/checkout@v4
@@ -54,7 +57,10 @@ jobs:
 
       # Thresholds live in vitest.config.ts coverage.thresholds (hard floor,
       # only ratchets up); vitest exits non-zero when any metric drops below.
+      # Main line only: the numbers are anchored to node 24 (dev machine + CI
+      # agree), the node-20 floor leg stays test-only.
       - name: Coverage gate (thresholds in vitest.config.ts)
+        if: matrix.node-version == 24
         run: npm run test:coverage
 
       - name: Smoke test
@@ -62,7 +68,10 @@ jobs:
 
       # The v0.14.1 production-bug trio shipped through green unit tests —
       # the real-E2E regression script is the gatekeeper and belongs in CI.
+      # Main line only: these boot real processes, and 24 is the line the
+      # engine actually runs on.
       - name: Real-bug regression (v0.14.1 trio)
+        if: matrix.node-version == 24
         run: npm run e2e:real-bugs
 
       # The v2 adapter's contract lives in the ENGINE, not in the published SDK
@@ -73,16 +82,19 @@ jobs:
       # Bump env.E2E_V2_VERSION (top of file) when the engine version changes —
       # the cache key reads the same variable, so they can never drift apart.
       - name: Cache the opencode v2 engine
+        if: matrix.node-version == 24
         uses: actions/cache@v4
         with:
           path: /tmp/dm-e2e-v2-*
           key: opencode-v2-engine-${{ runner.os }}-${{ env.E2E_V2_VERSION }}
 
       - name: v2 real-engine E2E gate
+        if: matrix.node-version == 24
         run: npm run e2e:v2
 
   # Weekly only (see `schedule:` at the top): the benchmark suite with its
   # timing assertions. Keeps the numbers honest without taxing PR runs.
+  # Node 24: benchmark numbers should describe the line the engine runs on.
   bench:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
@@ -90,7 +102,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
       - run: npm install
       - run: npm run build
       - name: Benchmark suite (BENCH=1)

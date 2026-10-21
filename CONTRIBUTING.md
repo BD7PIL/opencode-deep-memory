@@ -34,9 +34,12 @@ the full sequence. CI runs all of the above plus the coverage gate below.
 
 `npm run test:coverage` enforces the hard floor in `vitest.config.ts`
 (`coverage.thresholds`). It only ratchets up: raise a threshold together with
-the tests that raised it — never lower one to make a red run green. A weekly CI
-cron also runs `BENCH=1 npm test` for the timing benchmark suite, which is
-skipped on PRs on purpose (loose timing assertions flake on loaded machines).
+the tests that raised it — never lower one to make a red run green. The floor
+is anchored to node 24 — the unified main line across the three repos (dev
+machine, CI gate leg and the engine runtime all run 24); CI's node-20 leg is an
+engines-floor compatibility check and does not run coverage. A weekly CI cron
+also runs `BENCH=1 npm test` for the timing benchmark suite, which is skipped
+on PRs on purpose (loose timing assertions flake on loaded machines).
 
 ## Tests and fixtures
 
