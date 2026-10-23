@@ -52,6 +52,10 @@ const failures = []
 for (const file of markdownFiles(root)) {
   const rel = file.slice(root.length + 1).replaceAll('\\', '/')
   for (const target of linksOf(readFileSync(file, 'utf8'))) {
+    if (/(^|\/)\.zcode(\/|$)/.test(target)) {
+      failures.push(`${rel}: private development path ${target}`)
+      continue
+    }
     if (/^[a-z]+:/i.test(target)) {
       if (
         repo &&
