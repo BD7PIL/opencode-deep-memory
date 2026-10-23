@@ -5,12 +5,21 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write   # GitHub Release creation
+  id-token: write   # OIDC / provenance
+
+concurrency:
+  group: publish-deep-memory
+  cancel-in-progress: false
+
+env:
+  E2E_V2_VERSION: "2.0.32"
+
 jobs:
   publish:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
@@ -20,10 +29,10 @@ jobs:
           node-version: 22
           registry-url: "https://registry.npmjs.org"
 
-      - run: npm install
+      - run: npm ci
 
       - name: Upgrade npm (Trusted Publishing requires npm >= 11.5.1)
-        run: npm install -g npm@latest
+        run: npm install -g npm@11.5.1
 
       - name: Check tag matches package version
         run: |
@@ -33,12 +42,27 @@ jobs:
             exit 1
           }
 
+      - name: This version must not be on the registry yet
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "@bd7pil/opencode-deep-memory@$VERSION" version >/dev/null 2>&1; then
+            echo "::error::@bd7pil/opencode-deep-memory@$VERSION already exists; bump package.json"
+            exit 1
+          fi
+
+      - name: Cache the opencode v2 engine
+        uses: actions/cache@v4
+        with:
+          path: /tmp/dm-e2e-v2-*
+          key: opencode-v2-engine-${{ runner.os }}-${{ env.E2E_V2_VERSION }}
+
       - name: Verify (typecheck + build + test + smoke + e2e + v2 engine)
         run: npm run verify:release
 
       - name: Check the published tarball ships the directory entry
         run: |
-          T="$(npm pack --silent | tail -1)"
+          set -euo pipefail
+          T="$(npm pack --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log(Array.isArray(j)?j[0].filename:Object.values(j)[0].filename)})')"
           echo "tarball: $T"
           tar -tzf "$T" > /tmp/tar-list.txt
           for f in package/dist/index.js package/index.js package/provision.json package/THIRD-PARTY.md; do
@@ -46,7 +70,36 @@ jobs:
           done
           echo "tarball ships dist, the directory entry, provision.json and THIRD-PARTY.md"
 
-      - name: Publish
-        run: npm publish --provenance --access public
+      - name: Publish (retry-safe)
         env:
           NODE_AUTH_TOKEN: ""  # Empty string prevents token auth, forces OIDC fallback
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          for i in 1 2 3; do
+            if npm publish --provenance --access public; then exit 0; fi
+            if npm view "@bd7pil/opencode-deep-memory@$VERSION" version >/dev/null 2>&1; then
+              echo "publish landed despite the client error"
+              exit 0
+            fi
+            if [ "$i" -eq 3 ]; then exit 1; fi
+            echo "publish attempt $i failed; sleeping $((i * 15))s"
+            sleep $((i * 15))
+          done
+
+      - name: Create GitHub Release from CHANGELOG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          awk -v v="$VERSION" '
+            $0 ~ "^# " v "([ —-]|$)" { on=1; next }
+            on && /^# / { exit }
+            on { print }
+          ' CHANGELOG.md > /tmp/release-notes.md
+          test -s /tmp/release-notes.md
+          case "$VERSION" in *-*) PRE=--prerelease ;; *) PRE= ;; esac
+          gh release create "v$VERSION" -R "$GITHUB_REPOSITORY" \
+            --verify-tag --latest $PRE \
+            --title "opencode-deep-memory $VERSION" --notes-file /tmp/release-notes.md

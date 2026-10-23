@@ -1,6 +1,7 @@
 ---
 name: Feature request
 about: Propose a change to deep-memory
+title: "[feature] "
 labels: enhancement
 ---
 

@@ -46,15 +46,21 @@ v2 differences worth knowing:
 - **Diagnostics**: `DEEP_MEMORY_DEBUG=1` logs every registration, injection and
   event mapping.
 
-## Quick start
+## Install
+
+```bash
+npm i @bd7pil/opencode-deep-memory
+```
+
+Current package version: **0.16.5**. Requirements: Node.js >= 20; OpenCode 1.18.x
+(v1 `plugin` key) or OpenCode 2.x (v2 `plugins` key).
+
+For opencode v1 (the legacy `plugin` key):
 
 ```jsonc
 // opencode.json
 {
-  "plugin": [
-    "oh-my-openagent",
-    "@bd7pil/opencode-deep-memory"
-  ]
+  "plugin": ["@bd7pil/opencode-deep-memory"]
 }
 ```
 
@@ -74,9 +80,13 @@ air-gapped host can be given the unpacked tree:
 }
 ```
 
-`provision.json` at the package root states both forms, the
-`@opencode-ai/plugin` peer, and the post-install checks, so a provisioner can
-install this plugin without knowing anything about it.
+`provision.json` at the package root states both forms and the post-install
+checks. The package has no peer plugin dependency (`requiresPeer: []`), so a
+provisioner can install it without knowing anything about it.
+
+Project links: [CHANGELOG.md](CHANGELOG.md) · [CONTRIBUTING.md](CONTRIBUTING.md) ·
+[SECURITY.md](SECURITY.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) ·
+[LICENSE](LICENSE) · [THIRD-PARTY.md](THIRD-PARTY.md).
 
 ## What it does
 
@@ -322,4 +332,5 @@ V4+V5 designed through 4 rounds of research against production systems and acade
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE) and [THIRD-PARTY.md](THIRD-PARTY.md) (the bundled
+zod 4.1.8 notice).

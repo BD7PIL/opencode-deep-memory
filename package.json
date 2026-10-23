@@ -1,6 +1,6 @@
 {
   "name": "@bd7pil/opencode-deep-memory",
-  "version": "0.16.4",
+  "version": "0.16.5",
   "description": "Persistent context intelligence for OpenCode (v1 and v2) — cross-session memory, compaction checkpoints, context reconstruction.",
   "type": "module",
   "main": "dist/index.js",
@@ -48,6 +48,10 @@
     "persistent-memory"
   ],
   "license": "MIT",
+  "author": "bd7pil",
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
     "@opencode-ai/plugin": "*",

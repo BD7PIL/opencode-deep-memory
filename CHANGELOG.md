@@ -1,3 +1,18 @@
+# 0.16.5 — coverage gate, CI mainline, and release hygiene
+
+## Changed
+
+- Coverage hard floor in `vitest.config.ts` with 521 tests; CI mainline is
+  Node 24 (Node 20 remains an engines-floor compatibility leg), and a weekly
+  benchmark cron keeps the timing suite honest.
+- Removed a dead `src/extract` barrel; no runtime behavior change.
+- README gains an explicit Install section (v1 `plugin` and v2 `plugins`), the
+  current version, project links, and the correct requirement set.
+- `package.json` adds `author` and `publishConfig`; issue templates gain titles
+  and an issue-template config; the GitHub repository description is plain text.
+- Publish workflow: duplicate-version guard, concurrency/timeout, npm ci,
+  pinned npm 11.5.1, and a GitHub Release generated from this changelog.
+
 # 0.16.4 — open-source hygiene, bundled-dependency notice, Windows tests
 
 ## Added

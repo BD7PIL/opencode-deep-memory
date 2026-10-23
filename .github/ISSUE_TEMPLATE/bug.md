@@ -1,6 +1,7 @@
 ---
 name: Bug report
 about: Something in deep-memory behaves incorrectly
+title: "[bug] "
 labels: bug
 ---
 

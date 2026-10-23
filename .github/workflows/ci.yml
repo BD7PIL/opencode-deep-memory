@@ -17,9 +17,17 @@ env:
   # "脚本升了、缓存 key 忘了、每周都当缓存 miss 重下"的漂移。
   E2E_V2_VERSION: "2.0.32"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       matrix:
         # 24 = 主线统一线：门槛锚定、重 E2E、本机开发机与引擎实跑都在这条
@@ -35,7 +43,7 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
-      - run: npm install
+      - run: npm ci
 
       - name: Lint (biome, lint-only — formatting is not enforced)
         run: npm run lint
@@ -62,6 +70,15 @@ jobs:
       - name: Coverage gate (thresholds in vitest.config.ts)
         if: matrix.node-version == 24
         run: npm run test:coverage
+
+      - name: Upload coverage
+        if: always() && matrix.node-version == 24
+        uses: actions/upload-artifact@v4
+        with:
+          name: deep-memory-coverage
+          path: coverage/
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Smoke test
         run: npm run smoke
@@ -98,12 +115,13 @@ jobs:
   bench:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: npm install
+      - run: npm ci
       - run: npm run build
       - name: Benchmark suite (BENCH=1)
         run: BENCH=1 npm test

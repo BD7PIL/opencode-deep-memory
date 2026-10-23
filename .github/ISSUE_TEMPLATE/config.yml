@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security policy
+    url: https://github.com/BD7PIL/opencode-deep-memory/security/policy
+    about: Report vulnerabilities privately; do not open a public issue.
+  - name: Install and configuration
+    url: https://github.com/BD7PIL/opencode-deep-memory#install
+    about: Package install, v1/v2 config forms, and requirements.
+  - name: Releases and changelog
+    url: https://github.com/BD7PIL/opencode-deep-memory/releases
+    about: Check the current version and release notes before filing a bug.
