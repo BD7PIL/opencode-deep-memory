@@ -51,6 +51,9 @@ jobs:
       - name: Public-tree gate (private addresses / developer paths / credential shapes)
         run: node scripts/check-public-tree.mjs --root . --exclude .zcode --exclude coverage
 
+      - name: Public docs links
+        run: npm run check:links
+
       - name: Typecheck
         run: npm run typecheck
 

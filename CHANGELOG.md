@@ -1,3 +1,9 @@
+# Unreleased
+
+- Add a documentation link gate (`npm run check:links`): relative links must
+  resolve, and same-repo GitHub blob/tree links must point at an existing path.
+  It runs in CI and as the first step of `npm run verify`.
+
 # 0.16.5 — coverage gate, CI mainline, and release hygiene
 
 ## Changed
