@@ -45,7 +45,7 @@ async function buildPlugin(
   delete (globalThis as Record<string, unknown>)["__deepMemoryCachedHooks"];
   const hooks = await deepMemoryPlugin(
     { directory: project, serverUrl: new URL("http://localhost:0"), client } as never,
-    options,
+    options as never,
   );
   return hooks as unknown as EventHooks;
 }
