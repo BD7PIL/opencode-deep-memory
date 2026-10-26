@@ -97,6 +97,12 @@ function authHeader() {
 
 const requestLog = [];
 
+// Sub-session prompts: spawned by the plugin and (since 0.16.6) carrying their
+// own agent at session.create time. They are separate conversations with their
+// own prompt cache and their own agent's tool list, so the tool-signature gate
+// must hold per conversation rather than globally.
+const SUB_SESSION_MARKER = /You are a memory consolidation agent|You are performing CONTEXT COMPRESSION/;
+
 function analyze(body) {
   const tools = body.tools ?? [];
   const toolNames = tools.map((t) => t?.function?.name);
@@ -142,6 +148,7 @@ function analyze(body) {
     legacyTailMarkers: (JSON.stringify(body).match(/<deep-memory-context>/g) ?? []).length,
     reuseRatio: prefix.length ? lcp / prefix.length : 0,
     streamed: Boolean(body.stream),
+    isSubSession: SUB_SESSION_MARKER.test(JSON.stringify(body)),
   };
   requestLog.push(record);
   return record;
@@ -571,9 +578,31 @@ async function main() {
     // Only compare requests that share a tool signature: tool definitions
     // precede every system and message block, so a differing tool set makes the
     // prefix diverge at byte 0 and the ratio meaningless.
-    const signatures = [...new Set(withTools.map((record) => record.toolSignatureHash))];
-    check("tool definitions are byte-stable across every request", signatures.length === 1, `signatures=${signatures.join(",")}`);
-    const comparable = withTools.filter((record) => record.toolSignatureHash === signatures[0]);
+    //
+    // Scoped per conversation since 0.16.6: consolidation/compression
+    // sub-sessions now run their own agent (passed at session.create, because v2
+    // prompt payloads carry no agent), so their tool list legitimately differs
+    // from the primary agent's. The property that matters is that within ONE
+    // conversation the tool definitions never move between turns.
+    const primary = withTools.filter((record) => !record.isSubSession);
+    const subSessions = withTools.filter((record) => record.isSubSession);
+    const describe = (group) => {
+      const sigs = [...new Set(group.map((record) => record.toolSignatureHash))];
+      return sigs
+        .map((sig) => {
+          const first = group.find((record) => record.toolSignatureHash === sig);
+          return `${sig}[${first.toolNames.length} tools: ${first.toolNames.slice(0, 3).join(",")}...]`;
+        })
+        .join(" ");
+    };
+    const primarySignatures = [...new Set(primary.map((record) => record.toolSignatureHash))];
+    check("tool definitions are byte-stable within the primary conversation", primarySignatures.length === 1, describe(primary));
+    check(
+      "sub-sessions (own agent) keep a byte-stable tool list of their own",
+      subSessions.length === 0 || new Set(subSessions.map((record) => record.toolSignatureHash)).size === 1,
+      `${subSessions.length} sub-session requests; ${describe(subSessions) || "none"}`,
+    );
+    const comparable = primary.filter((record) => record.toolSignatureHash === primarySignatures[0]);
 
     // Assert on the block the plugin owns.
     const withBlock = comparable.filter((record) => record.blockChars > 0);

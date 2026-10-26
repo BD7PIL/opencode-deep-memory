@@ -134,7 +134,16 @@ async function main() {
   // ─── Bug 3: pending consolidation removal is persisted after consume ─────
   console.log("--- Bug 3: pending persist after consume (50e8ec7) ---");
   const pendingFile = path.join(tmpProject, ".deep-memory", ".pending-consolidation.json");
-  const hooks3 = await loadHooks();
+  // 0.16.6 re-poll semantics: an idle tick with a non-terminal sub-session
+  // KEEPS the pending entry by design. Drive a terminal assistant message so
+  // this test exercises what it is here for — the consume path syncing disk.
+  const hooks3 = await loadHooks({
+    ...makeClient(),
+    session: {
+      ...makeClient().session,
+      messages: async () => ({ data: [{ info: { role: "assistant" }, parts: [{ type: "text", text: "done" }] }] }),
+    },
+  });
   // Spawn path persists the pending entry (pre-existing behavior)...
   fs.mkdirSync(path.join(tmpProject, ".deep-memory"), { recursive: true });
   const memForSpawn = Array.from({ length: 30 }, (_, i) => `- [decision] consolidation trigger line ${i + 1} with padding`).join("\n");
