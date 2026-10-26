@@ -34,13 +34,20 @@ import { getLanguage } from "./repomap/extractor.js";
 import { existsSync as existsSyncSync, statSync } from "node:fs";
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { buildConsolidationPrompt, validateConsolidation } from "./extract/consolidate.js";
+import {
+  resolveConsolidationConfig,
+  type ConsolidationConfig,
+  type ConsolidationOptions,
+} from "./shared/consolidation-config.js";
+import { probeAgent } from "./shared/agent-probe.js";
 
-export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
+export const deepMemoryPlugin: Plugin = async (input: PluginInput, options?: unknown): Promise<Hooks> => {
   const cached = (globalThis as Record<string, unknown>)["__deepMemoryCachedHooks"] as Hooks | undefined;
   if (cached) return cached;
 
   const logger = createLogger();
   const state = createPluginState();
+  const consolidation = resolveConsolidationConfig(options as ConsolidationOptions | undefined);
 
   const projectPath = input.directory;
   const dataRoot = resolveDataRoot();
@@ -102,7 +109,7 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
     });
   });
 
-  const memoryTools = createMemoryTools(searchService, state, { projectPath, client: input.client });
+  const memoryTools = createMemoryTools(searchService, state, { projectPath, client: input.client, consolidation });
 
   const hooks: Hooks = {
     "chat.params": createChatParamsHandler(
@@ -133,7 +140,7 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
 
           if (idleSessionID) {
             try {
-              await handleIdleConsolidation(input.client, state, projectPath, idleSessionID, logger.for("idle-consolidation"));
+              await handleIdleConsolidation(input.client, state, projectPath, idleSessionID, logger.for("idle-consolidation"), consolidation);
             } catch (err) {
               logger.debug("idle consolidation failed (non-fatal)", {
                 error: err instanceof Error ? err.message : String(err),
@@ -229,6 +236,7 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
       projectPath,
       logger: logger.for("compacting"),
       tracker,
+      consolidation,
     }),
 
     "experimental.chat.messages.transform": createMessagesTransformHandler(
@@ -246,9 +254,21 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput): Promise<Hook
 type IdleClient = {
   session: {
     messages: (args: { path: { id: string }; query?: { limit?: number } }) => Promise<{ data?: unknown[] }>;
-    create: (args: { body: { parentID: string; title: string }; query: { directory: string } }) => Promise<{ data?: { id?: string } }>;
+    create: (args: {
+      body: {
+        parentID: string;
+        title: string;
+        /** Set at session level: v2 engines drop prompt-body `agent`. */
+        agent?: string;
+        model?: { providerID: string; modelID: string };
+      };
+      query: { directory: string };
+    }) => Promise<{ data?: { id?: string } }>;
     promptAsync: (args: { path: { id: string }; body: { parts: Array<{ type: string; text: string }>; agent: string } }) => Promise<unknown>;
   };
+  /** Optional agent-listing face (v2 adapter / v1 SDK) used by the spawn precheck. */
+  agent?: { list?: () => Promise<unknown> };
+  app?: { agents?: () => Promise<unknown> };
   tui?: {
     showToast?: (args: { body: { title: string; message: string; variant: string; duration: number } }) => Promise<unknown>;
   };
@@ -262,6 +282,22 @@ async function showToast(client: IdleClient, message: string, variant: "info" | 
   } catch {}
 }
 
+/** Log+toast once when the failure budget is exhausted. Safe to call after every failure. */
+async function maybeGiveUp(
+  state: ReturnType<typeof createPluginState>,
+  consolidation: ConsolidationConfig,
+  logger: { warn: (msg: string, meta?: Record<string, unknown>) => void },
+  client: IdleClient,
+): Promise<void> {
+  if (state.consolidationFailures() < consolidation.maxFailures) return;
+  if (!state.markConsolidationGaveUpLogged()) return;
+  logger.warn("idle consolidation: failure limit reached; disabled until restart", {
+    failures: state.consolidationFailures(),
+    maxFailures: consolidation.maxFailures,
+  });
+  await showToast(client, "▣ deep-memory | consolidation disabled until restart (repeated failures)", "warning");
+}
+
 async function handleIdleConsolidation(
   client: unknown,
   state: ReturnType<typeof createPluginState>,
@@ -271,9 +307,11 @@ async function handleIdleConsolidation(
     info: (msg: string, meta?: Record<string, unknown>) => void;
     warn: (msg: string, meta?: Record<string, unknown>) => void;
   },
+  consolidation: ConsolidationConfig,
 ): Promise<void> {
   const typedClient = client as IdleClient;
   if (!typedClient?.session) return;
+  if (!consolidation.enabled) return;
 
   // CRITICAL GUARD: never run consolidation on a session this plugin spawned.
   // The consolidation sub-session is created via client.session.create + promptAsync
@@ -295,61 +333,140 @@ async function handleIdleConsolidation(
   const memLines = content.split("\n").length;
   const memStat = statSync(memPath);
 
-  const pending = state.consumePendingConsolidation(sessionID);
+  const pending = state.peekPendingConsolidation(sessionID);
   if (pending) {
-    // Sync disk: consumed entry must be removed from persisted pending file.
-    // (Otherwise stale entries accumulate across restarts.)
-    state.persistPendingConsolidation(projectPath);
-    const currentMtime = memStat.mtimeMs;
-    if (currentMtime > pending.memMtime) {
-      await showToast(typedClient, "▣ deep-memory | consolidation discarded (mtime race)", "warning");
-      logger.info("idle consolidation: discarded (mtime race)");
-    } else {
-      try {
-        const resp = await typedClient.session.messages({ path: { id: pending.subSessionID }, query: { limit: 1 } });
-        const msgs = resp.data ?? [];
-        const lastAssistant = msgs[msgs.length - 1] as { info?: { role?: string }; parts?: Array<{ type?: string; text?: string }> } | undefined;
-        if (lastAssistant?.info?.role === "assistant") {
-          // Detect LLM error (e.g. unsupported model, provider 400). The assistant
-          // message carries an error part instead of a text part.
-          const errorPart = (lastAssistant.parts ?? []).find(p => p.type === "error");
-          if (errorPart) {
-            logger.warn("idle consolidation: sub-session LLM failed", {
-              subSessionID: pending.subSessionID,
-              error: JSON.stringify(errorPart),
-            });
-            await showToast(typedClient, "▣ deep-memory | consolidation failed (LLM error, see log)", "warning");
-            return;
-          }
-          for (const part of lastAssistant.parts ?? []) {
-            if (part.type === "text" && part.text) {
-              const release = await acquireLock(memPath);
-              try {
-                // Validate LLM output before writing (DCP #573 guard)
-                const validation = validateConsolidation(content, part.text, { lines: memLines });
-                if (!validation.ok) {
-                  logger.warn("idle consolidation: rejected", { reason: validation.reason });
-                  await showToast(typedClient, `▣ deep-memory | consolidation rejected (${validation.reason})`, "warning");
-                  return;
-                }
-                const current = await readFile(memPath, "utf8");
-                const backupPath = memPath.replace("MEMORY.md", "MEMORY.bak.md");
-                await writeFile(backupPath, current, "utf8");
-                await writeFile(memPath, part.text, "utf8");
-                const newLines = part.text.split("\n").length;
-                state.recordConsolidationDone(newLines);
-                await showToast(typedClient, `▣ deep-memory | memory consolidated: MEMORY.md (${newLines} lines / ${Math.round(part.text.length / 1024 * 10) / 10} KB)`);
-                logger.info("idle consolidation: applied", { lines: newLines });
-              } finally {
-                release();
-              }
-              break;
-            }
+    // Re-poll semantics: a consolidation sub-session typically runs for minutes.
+    // The old code consumed the pending entry on the FIRST idle tick and
+    // silently lost any not-yet-finished result. Now: read the sub-session
+    // state first and keep the pending entry while it is still running; consume
+    // only on a terminal state (assistant text / error part) or when the entry
+    // is older than consolidation.pendingTimeoutMs.
+    let finished = false;
+    let errorJson: string | undefined;
+    let text: string | undefined;
+    try {
+      const resp = await typedClient.session.messages({ path: { id: pending.subSessionID }, query: { limit: 1 } });
+      const msgs = resp.data ?? [];
+      const last = msgs[msgs.length - 1] as { info?: { role?: string }; parts?: Array<{ type?: string; text?: string }> } | undefined;
+      if (last?.info?.role === "assistant") {
+        const parts = last.parts ?? [];
+        const errorPart = parts.find((p) => p.type === "error");
+        if (errorPart) {
+          finished = true;
+          errorJson = JSON.stringify(errorPart);
+        }
+        for (const part of parts) {
+          if (part.type === "text" && part.text) {
+            text = part.text;
+            finished = true;
+            break;
           }
         }
-      } catch (err) {
-        logger.warn("idle consolidation: failed to apply result", { error: err instanceof Error ? err.message : String(err) });
       }
+    } catch (err) {
+      logger.warn("idle consolidation: failed to read sub-session", {
+        subSessionID: pending.subSessionID,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    const aged = Date.now() - pending.setAt > consolidation.pendingTimeoutMs;
+    if (!finished && !aged) return; // still running (or transient read error) — re-poll next idle
+
+    // Terminal or aged: consume (one-shot, mirrored to disk) and resolve.
+    state.consumePendingConsolidation(sessionID);
+    state.persistPendingConsolidation(projectPath);
+
+    if (!finished) {
+      state.recordConsolidationFailure();
+      logger.warn("idle consolidation: sub-session timed out", {
+        subSessionID: pending.subSessionID,
+        failures: state.consolidationFailures(),
+      });
+      await showToast(typedClient, `▣ deep-memory | consolidation timed out (${state.consolidationFailures()}/${consolidation.maxFailures})`, "warning");
+      await maybeGiveUp(state, consolidation, logger, typedClient);
+      return;
+    }
+    if (errorJson !== undefined) {
+      state.recordConsolidationFailure();
+      logger.warn("idle consolidation: sub-session LLM failed", {
+        subSessionID: pending.subSessionID,
+        error: errorJson,
+        failures: state.consolidationFailures(),
+      });
+      await showToast(typedClient, `▣ deep-memory | consolidation failed (LLM error, ${state.consolidationFailures()}/${consolidation.maxFailures})`, "warning");
+      await maybeGiveUp(state, consolidation, logger, typedClient);
+      return;
+    }
+    if (text === undefined) {
+      // Assistant message with neither a text nor an error part — previously a
+      // silent fallthrough that lost the pending entry without a trace.
+      state.recordConsolidationFailure();
+      logger.warn("idle consolidation: assistant message had no text part", {
+        subSessionID: pending.subSessionID,
+        failures: state.consolidationFailures(),
+      });
+      await maybeGiveUp(state, consolidation, logger, typedClient);
+      return;
+    }
+
+    const currentMtime = memStat.mtimeMs;
+    if (currentMtime > pending.memMtime) {
+      state.recordConsolidationFailure();
+      await showToast(typedClient, "▣ deep-memory | consolidation discarded (mtime race)", "warning");
+      logger.info("idle consolidation: discarded (mtime race)", { failures: state.consolidationFailures() });
+      await maybeGiveUp(state, consolidation, logger, typedClient);
+      return;
+    }
+    try {
+      const release = await acquireLock(memPath);
+      try {
+        // Validate LLM output before writing (DCP #573 guard)
+        const validation = validateConsolidation(content, text, { lines: memLines });
+        if (!validation.ok) {
+          state.recordConsolidationFailure();
+          logger.warn("idle consolidation: rejected", {
+            reason: validation.reason,
+            failures: state.consolidationFailures(),
+          });
+          await showToast(typedClient, `▣ deep-memory | consolidation rejected (${validation.reason}; ${state.consolidationFailures()}/${consolidation.maxFailures})`, "warning");
+          return;
+        }
+        const current = await readFile(memPath, "utf8");
+        if (statSync(memPath).mtimeMs > pending.memMtime) {
+          state.recordConsolidationFailure();
+          await showToast(typedClient, "▣ deep-memory | consolidation discarded (mtime race)", "warning");
+          logger.info("idle consolidation: discarded (mtime race, in lock)", { failures: state.consolidationFailures() });
+          return;
+        }
+        const backupPath = memPath.replace("MEMORY.md", "MEMORY.bak.md");
+        await writeFile(backupPath, current, "utf8");
+        await writeFile(memPath, text, "utf8");
+        const newLines = text.split("\n").length;
+        state.recordConsolidationDone(newLines);
+        await showToast(typedClient, `▣ deep-memory | memory consolidated: MEMORY.md (${newLines} lines / ${Math.round(text.length / 1024 * 10) / 10} KB)`);
+        logger.info("idle consolidation: applied", { lines: newLines });
+      } finally {
+        release();
+      }
+    } catch (err) {
+      state.recordConsolidationFailure();
+      logger.warn("idle consolidation: failed to apply result", {
+        error: err instanceof Error ? err.message : String(err),
+        failures: state.consolidationFailures(),
+      });
+      await maybeGiveUp(state, consolidation, logger, typedClient);
+    }
+    return;
+  }
+
+  if (state.consolidationFailures() >= consolidation.maxFailures) {
+    if (state.markConsolidationGaveUpLogged()) {
+      logger.warn("idle consolidation: failure limit reached; disabled until restart", {
+        failures: state.consolidationFailures(),
+        maxFailures: consolidation.maxFailures,
+      });
+      await showToast(typedClient, "▣ deep-memory | consolidation disabled until restart (repeated failures)", "warning");
     }
     return;
   }
@@ -361,26 +478,47 @@ async function handleIdleConsolidation(
     logger.info("idle consolidation: cooldown active, skipping");
     return;
   }
+
+  // Agent precheck: on hosts without the configured agent, a spawned sub-session
+  // would run the host's default-agent chain instead (v2 engines drop the
+  // prompt-body `agent` field entirely). Ask first, skip loudly.
+  const agentPresent = await probeAgent(typedClient, consolidation.agent);
+  if (agentPresent === false) {
+    if (state.markConsolidationAgentMissingLogged()) {
+      logger.warn("idle consolidation: agent not found on host; consolidation disabled", {
+        agent: consolidation.agent,
+      });
+      await showToast(typedClient, `▣ deep-memory | consolidation skipped: agent "${consolidation.agent}" not found`, "warning");
+    }
+    return;
+  }
   state.recordConsolidationAttempt();
 
   try {
+    const model = state.bestModel();
     const resp = await typedClient.session.create({
       body: {
         parentID: sessionID,
         title: `Memory Consolidation ${new Date().toISOString().slice(0, 10)}`,
+        agent: consolidation.agent,
+        ...(model ? { model } : {}),
       },
       query: { directory: projectPath },
     });
     const subID = resp?.data?.id;
-    if (!subID) return;
+    if (!subID) {
+      state.recordConsolidationFailure();
+      logger.warn("idle consolidation: session.create returned no id", { failures: state.consolidationFailures() });
+      await maybeGiveUp(state, consolidation, logger, typedClient);
+      return;
+    }
 
     const prompt = buildConsolidationPrompt(content, { lines: memLines, bytes: content.length });
-    const model = state.bestModel();
     await typedClient.session.promptAsync({
       path: { id: subID },
       body: {
         parts: [{ type: "text", text: prompt }],
-        agent: "general",
+        agent: consolidation.agent,
         ...(model ? { model } : {}),
       },
     });
@@ -388,10 +526,15 @@ async function handleIdleConsolidation(
     state.setPendingConsolidation(sessionID, { subSessionID: subID, memMtime: memStat.mtimeMs });
     state.markSubSessionSpawned(subID);
     state.persistPendingConsolidation(projectPath);
-    await showToast(typedClient, "▣ deep-memory | memory consolidation spawned (general)", "info", 3000);
-    logger.info("idle consolidation: spawned", { subSessionID: subID, lines: memLines });
+    await showToast(typedClient, `▣ deep-memory | memory consolidation spawned (${consolidation.agent})`, "info", 3000);
+    logger.info("idle consolidation: spawned", { subSessionID: subID, lines: memLines, agent: consolidation.agent });
   } catch (err) {
-    logger.warn("idle consolidation: failed to spawn", { error: err instanceof Error ? err.message : String(err) });
+    state.recordConsolidationFailure();
+    logger.warn("idle consolidation: failed to spawn", {
+      error: err instanceof Error ? err.message : String(err),
+      failures: state.consolidationFailures(),
+    });
+    await maybeGiveUp(state, consolidation, logger, typedClient);
   }
 
   // G5 cleanup: remove .tool-outputs/ files older than 7 days (best-effort)

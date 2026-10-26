@@ -1,19 +1,23 @@
 import { tool } from "../shared/tool.js";
 import type { PluginState } from "../hooks/shared-state.js";
 import { buildCompressionPrompt } from "../compress/compression-prompt.js";
+import { probeAgent } from "../shared/agent-probe.js";
+import type { ConsolidationConfig } from "../shared/consolidation-config.js";
 
 type OpencodeClient = {
   session: {
     messages: (args: { path: { id: string } }) => Promise<{ data?: unknown[] }>;
-    create: (args: { body: { parentID: string; title: string }; query: { directory: string } }) => Promise<{ data?: { id?: string } }>;
+    create: (args: { body: { parentID: string; title: string; agent?: string; model?: { providerID: string; modelID: string } }; query: { directory: string } }) => Promise<{ data?: { id?: string } }>;
     promptAsync: (args: { path: { id: string }; body: { parts: Array<{ type: string; text: string }>; agent: string } }) => Promise<unknown>;
   };
+  agent?: { list?: () => Promise<unknown> };
+  app?: { agents?: () => Promise<unknown> };
   tui: {
     showToast: (args: { body: { title: string; message: string; variant: string; duration: number } }) => Promise<unknown>;
   };
 };
 
-export function createContextCompressTool(state: PluginState, client: unknown, projectPath: string) {
+export function createContextCompressTool(state: PluginState, client: unknown, projectPath: string, consolidation: ConsolidationConfig) {
   const typedClient = client as OpencodeClient | undefined;
   return tool({
     description:
@@ -71,12 +75,27 @@ export function createContextCompressTool(state: PluginState, client: unknown, p
 
       const toCompress = allMessages.slice(0, cutoff);
 
+      // Agent precheck: on hosts without the configured agent the sub-session
+      // would silently run the host default persona (v2 drops prompt-body
+      // agent fields). Fall back to empty-summary compression instead.
+      const agentPresent = await probeAgent(typedClient, consolidation.agent);
+      if (agentPresent === false) {
+        state.requestContentAwareCompression({ keepRecent: keep, summary: "" });
+        return {
+          title: "Compression scheduled (no subagent)",
+          output: `Subagent agent "${consolidation.agent}" not available on this host. Empty summary compression will be applied on next turn.`,
+        };
+      }
+
       let subID: string | undefined;
       try {
+        const model = state.bestModel();
         const resp = await typedClient.session.create({
           body: {
             parentID: sessionID,
             title: `Context Compression ${new Date().toISOString().slice(0, 10)}`,
+            agent: consolidation.agent,
+            ...(model ? { model } : {}),
           },
           query: { directory: projectPath || context.directory },
         });
@@ -96,7 +115,7 @@ export function createContextCompressTool(state: PluginState, client: unknown, p
           path: { id: subID },
           body: {
             parts: [{ type: "text", text: prompt }],
-            agent: "general",
+            agent: consolidation.agent,
             ...(model ? { model } : {}),
           },
         });
@@ -114,7 +133,7 @@ export function createContextCompressTool(state: PluginState, client: unknown, p
       typedClient.tui.showToast({
         body: {
           title: "deep-memory",
-          message: "▣ deep-memory | context compression spawned (general)",
+          message: `▣ deep-memory | context compression spawned (${consolidation.agent})`,
           variant: "info",
           duration: 3000,
         },

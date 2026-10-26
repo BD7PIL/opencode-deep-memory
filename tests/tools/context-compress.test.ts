@@ -9,13 +9,14 @@ import { describe, it, expect } from "vitest";
 import { createContextCompressTool } from "../../src/tools/context-compress.js";
 import { createPluginState } from "../../src/hooks/shared-state.js";
 import { mockHostClient, makeMessages } from "../helpers/mock-host.js";
+import { CONSOLIDATION_DEFAULTS } from "../../src/shared/consolidation-config.js";
 
 function build(opts: { client?: unknown; messages?: number; projectPath?: string } = {}) {
   const state = createPluginState();
   // `'client' in opts` and not `??`: passing an explicit undefined means
   // "no host client at all" — a different branch from "client present".
   const client = "client" in opts ? opts.client : mockHostClient({ messages: makeMessages(opts.messages ?? 20) });
-  const toolInstance = createContextCompressTool(state, client, opts.projectPath ?? "/tmp/proj");
+  const toolInstance = createContextCompressTool(state, client, opts.projectPath ?? "/tmp/proj", CONSOLIDATION_DEFAULTS);
   return { state, client, toolInstance };
 }
 

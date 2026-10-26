@@ -435,12 +435,29 @@ export function buildV2Client(ctx: V2Ctx): unknown {
           return { data: [] };
         }
       },
-      async create(args: { body?: { parentID?: string; title?: string }; query?: { directory?: string } }) {
+      async create(args: {
+        body?: {
+          parentID?: string;
+          title?: string;
+          agent?: string;
+          model?: { providerID: string; modelID: string; variant?: string };
+        };
+        query?: { directory?: string };
+      }) {
         if (!session?.create) return { data: undefined };
+        const m = args.body?.model;
         const result = await session.create({
           directory: args.query?.directory,
           title: args.body?.title,
           parentID: args.body?.parentID,
+          // The whole point of the 0.16.6 fix: v2 prompt payloads have no
+          // agent/model fields, so the sub-session persona and model MUST ride
+          // on session.create (engine host accepts both unvalidated; older
+          // engines that lack them simply ignore the extra keys).
+          agent: args.body?.agent,
+          model: m
+            ? { providerID: m.providerID, id: m.modelID, ...(m.variant ? { variant: m.variant } : {}) }
+            : undefined,
         });
         const id = (result as { id?: string })?.id ?? (result as { data?: { id?: string } })?.data?.id;
         return { data: { id } };
@@ -459,6 +476,36 @@ export function buildV2Client(ctx: V2Ctx): unknown {
             /* a failed sub-session turn is non-fatal */
           });
         return { data: undefined };
+      },
+    },
+    agent: {
+      // Spawn-precheck face (probeAgent). Prefer the in-process engine face,
+      // fall back to the loopback HTTP API; on total failure return an empty
+      // list so the probe reports "cannot determine" and never disables
+      // consolidation by accident.
+      async list() {
+        const ctxFace = (ctx.agent as { list?: unknown } | undefined)?.list;
+        if (typeof ctxFace === "function") {
+          try {
+            return await (ctxFace as (input?: unknown) => Promise<unknown>)();
+          } catch (e) {
+            note("agent.list via ctx face failed, trying http: " + errmsg(e));
+          }
+        }
+        try {
+          const response = await fetch(
+            `http://127.0.0.1:${process.env["OPENCODE_SERVER_PORT"] ?? "4096"}/api/agent`,
+            { headers: httpAuthHeaders() },
+          );
+          if (!response.ok) {
+            note(`agent.list http fallback: ${response.status}`);
+            return { data: [] };
+          }
+          return await response.json();
+        } catch (e) {
+          note("agent.list http fallback failed: " + errmsg(e));
+          return { data: [] };
+        }
       },
     },
     tui: {

@@ -22,6 +22,8 @@ import { existsSync } from "node:fs";
 import { acquireLock } from "../shared/lock.js";
 import { memoryFilePath } from "../shared/paths.js";
 import { HANDOFF_PREFIX, STRUCTURED_COMPACTION_PROMPT } from "../extract/summarize.js";
+import { probeAgent } from "../shared/agent-probe.js";
+import { resolveConsolidationConfig, type ConsolidationConfig } from "../shared/consolidation-config.js";
 
 /** Minimal client shape needed — avoids importing full PluginInput type. */
 interface SessionClient {
@@ -31,11 +33,13 @@ interface SessionClient {
       query?: { directory?: string; limit?: number };
     }): Promise<{ data: Array<{ info: unknown; parts: unknown[] }> | undefined }>;
     create(opts: {
-      body: { parentID: string; title: string };
+      body: { parentID: string; title: string; agent?: string; model?: { providerID: string; modelID: string } };
       query?: { directory?: string };
     }): Promise<unknown>;
     promptAsync(opts: { path: { id: string }; body: { parts: unknown[]; agent?: string } }): Promise<unknown>;
   };
+  agent?: { list?: () => Promise<unknown> };
+  app?: { agents?: () => Promise<unknown> };
   tui?: {
     showToast?(opts: { body: { title: string; message: string; variant: string; duration: number } }): Promise<unknown>;
   };
@@ -47,6 +51,8 @@ export interface CompactingHandlerArgs {
   projectPath: string;
   logger?: Logger;
   tracker?: RepoMapTracker;
+  /** Optional; defaults resolve from env (kept optional for older call sites). */
+  consolidation?: ConsolidationConfig;
 }
 
 /**
@@ -59,6 +65,7 @@ export function createCompactingHandler(
   args: CompactingHandlerArgs,
 ): NonNullable<Hooks["experimental.session.compacting"]> {
   const { client, state, projectPath, logger, tracker } = args;
+  const consolidation = args.consolidation ?? resolveConsolidationConfig();
 
   return async (input, output) => {
     const { sessionID } = input;
@@ -146,7 +153,10 @@ export function createCompactingHandler(
           if (existsSync(memPath)) {
             const currentMtime = (await import("node:fs")).statSync(memPath).mtimeMs;
             if (currentMtime > pendingConsolidation.memMtime) {
-              logger?.info("compacting: MEMORY.md changed since consolidation start, discarding LLM result");
+              state.recordConsolidationFailure();
+              logger?.info("compacting: MEMORY.md changed since consolidation start, discarding LLM result", {
+                failures: state.consolidationFailures(),
+              });
               try {
                 await client.tui?.showToast?.({
                   body: {
@@ -166,9 +176,11 @@ export function createCompactingHandler(
                 const parts = (lastAssistantMsg.parts ?? []) as Array<{ type?: string; text?: string }>;
                 const errorPart = parts.find(p => p.type === "error");
                 if (errorPart) {
+                  state.recordConsolidationFailure();
                   logger?.warn("compacting: consolidation sub-session LLM failed", {
                     subSessionID: pendingConsolidation.subSessionID,
                     error: JSON.stringify(errorPart),
+                    failures: state.consolidationFailures(),
                   });
                   try {
                     await client.tui?.showToast?.({
@@ -189,7 +201,10 @@ export function createCompactingHandler(
                       const current = await readFile(memPath, "utf8");
                       const currentStat = (await import("node:fs")).statSync(memPath);
                       if (currentStat.mtimeMs > pendingConsolidation.memMtime) {
-                        logger?.info("compacting: MEMORY.md changed, discarding LLM consolidation result");
+                        state.recordConsolidationFailure();
+                        logger?.info("compacting: MEMORY.md changed, discarding LLM consolidation result", {
+                          failures: state.consolidationFailures(),
+                        });
                         try {
                           await client.tui?.showToast?.({
                             body: {
@@ -204,7 +219,11 @@ export function createCompactingHandler(
                         // Validate LLM output before writing (DCP #573 guard)
                         const validation = validateConsolidation(current, p.text, { lines: current.split("\n").length });
                         if (!validation.ok) {
-                          logger?.warn("compacting: consolidation rejected", { reason: validation.reason });
+                          state.recordConsolidationFailure();
+                          logger?.warn("compacting: consolidation rejected", {
+                            reason: validation.reason,
+                            failures: state.consolidationFailures(),
+                          });
                           try {
                             await client.tui?.showToast?.({
                               body: { title: "deep-memory", message: `▣ deep-memory | consolidation rejected (${validation.reason})`, variant: "warning", duration: 5000 },
@@ -215,6 +234,10 @@ export function createCompactingHandler(
                         const backupPath = memPath.replace("MEMORY.md", "MEMORY.bak.md");
                         await writeFile(backupPath, current, "utf8");
                         await writeFile(memPath, p.text, "utf8");
+                        // Parity with the idle path: a compaction-applied
+                        // consolidation must also reset the trigger counters,
+                        // otherwise shouldConsolidate() stays true.
+                        state.recordConsolidationDone(p.text.split("\n").length);
                         logger?.info("compacting: LLM consolidation applied", {
                           beforeBytes: current.length,
                           afterBytes: p.text.length,
@@ -229,8 +252,10 @@ export function createCompactingHandler(
             }
           }
         } catch (err) {
+          state.recordConsolidationFailure();
           logger?.warn("compacting: LLM consolidation extraction failed", {
             error: err instanceof Error ? err.message : String(err),
+            failures: state.consolidationFailures(),
           });
         }
       }
@@ -241,52 +266,80 @@ export function createCompactingHandler(
       // Guard: skip if THIS session was itself plugin-spawned (e.g. we are compacting inside
       // an idle consolidation sub-session). Same root-cause guard as src/index.ts idle handler.
       if (!pendingConsolidation && !state.isSpawnedSubSession(sessionID)) {
-        // DCP #439 cooldown: prevent rapid re-consolidation attempts
-        if (!state.canStartConsolidation()) {
-          logger?.debug("compacting: consolidation cooldown active, skipping spawn");
-        } else {
-        state.recordConsolidationAttempt();
-        try {
-          const memPath = memoryFilePath("project", "memory", projectPath);
-          if (existsSync(memPath)) {
-            const content = await readFile(memPath, "utf8");
-            const lineCount = content.split("\n").length;
-            if (lineCount > 50) {
-              try {
-                const resp = await client.session.create({
-                  body: { parentID: sessionID, title: `Memory Consolidation ${new Date().toISOString().slice(0, 10)}` },
-                  query: { directory: projectPath },
-                });
-                const subID = (resp as { data?: { id: string } })?.data?.id;
-                if (subID) {
-                  const prompt = buildConsolidationPrompt(content, { lines: lineCount, bytes: content.length });
-                  const model = state.bestModel();
-                  await client.session.promptAsync({
-                    path: { id: subID },
-                    body: {
-                      parts: [{ type: "text", text: prompt }],
-                      agent: "general",
-                      ...(model ? { model } : {}),
-                    },
-                  });
-                  const memStat = (await import("node:fs")).statSync(memPath);
-                  state.setPendingConsolidation(sessionID, { subSessionID: subID, memMtime: memStat.mtimeMs });
-                  state.markSubSessionSpawned(subID);
-                  state.persistPendingConsolidation(projectPath);
-                  logger?.info("compacting: spawned LLM consolidation sub-session", {
-                    subSessionID: subID, lines: lineCount,
-                  });
+        if (state.consolidationFailures() >= consolidation.maxFailures) {
+          if (state.markConsolidationGaveUpLogged()) {
+            logger?.warn("compacting: consolidation failure limit reached; disabled until restart", {
+              failures: state.consolidationFailures(),
+              maxFailures: consolidation.maxFailures,
+            });
+          }
+        } else if (consolidation.enabled && state.canStartConsolidation()) {
+          state.recordConsolidationAttempt();
+          try {
+            const memPath = memoryFilePath("project", "memory", projectPath);
+            if (existsSync(memPath)) {
+              const content = await readFile(memPath, "utf8");
+              const lineCount = content.split("\n").length;
+              if (lineCount > 50) {
+                // Agent precheck — same rationale as the idle path: v2 engines
+                // drop the prompt-body agent, so an absent agent silently runs
+                // the host default persona instead.
+                const agentPresent = await probeAgent(client, consolidation.agent);
+                if (agentPresent === false) {
+                  if (state.markConsolidationAgentMissingLogged()) {
+                    logger?.warn("compacting: consolidation agent not found on host; skipping spawn", {
+                      agent: consolidation.agent,
+                    });
+                  }
+                } else {
+                  try {
+                    const model = state.bestModel();
+                    const resp = await client.session.create({
+                      body: {
+                        parentID: sessionID,
+                        title: `Memory Consolidation ${new Date().toISOString().slice(0, 10)}`,
+                        agent: consolidation.agent,
+                        ...(model ? { model } : {}),
+                      },
+                      query: { directory: projectPath },
+                    });
+                    const subID = (resp as { data?: { id: string } })?.data?.id;
+                    if (subID) {
+                      const prompt = buildConsolidationPrompt(content, { lines: lineCount, bytes: content.length });
+                      await client.session.promptAsync({
+                        path: { id: subID },
+                        body: {
+                          parts: [{ type: "text", text: prompt }],
+                          agent: consolidation.agent,
+                          ...(model ? { model } : {}),
+                        },
+                      });
+                      const memStat = (await import("node:fs")).statSync(memPath);
+                      state.setPendingConsolidation(sessionID, { subSessionID: subID, memMtime: memStat.mtimeMs });
+                      state.markSubSessionSpawned(subID);
+                      state.persistPendingConsolidation(projectPath);
+                      logger?.info("compacting: spawned LLM consolidation sub-session", {
+                        subSessionID: subID, lines: lineCount, agent: consolidation.agent,
+                      });
+                    } else {
+                      state.recordConsolidationFailure();
+                      logger?.warn("compacting: consolidation session.create returned no id", {
+                        failures: state.consolidationFailures(),
+                      });
+                    }
+                  } catch (spawnErr) {
+                    state.recordConsolidationFailure();
+                    logger?.warn("compacting: failed to spawn consolidation sub-session", {
+                      error: spawnErr instanceof Error ? spawnErr.message : String(spawnErr),
+                      failures: state.consolidationFailures(),
+                    });
+                  }
                 }
-              } catch (spawnErr) {
-                logger?.warn("compacting: failed to spawn consolidation sub-session", {
-                  error: spawnErr instanceof Error ? spawnErr.message : String(spawnErr),
-                });
               }
             }
+          } catch (err) {
+            logger?.debug("compacting: no MEMORY.md to consolidate", { error: err instanceof Error ? err.message : String(err) });
           }
-        } catch (err) {
-          logger?.debug("compacting: no MEMORY.md to consolidate", { error: err instanceof Error ? err.message : String(err) });
-        }
         }
       }
 

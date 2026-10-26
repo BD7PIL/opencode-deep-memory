@@ -122,7 +122,12 @@ export interface V2Ctx {
   };
   options?: Record<string, unknown>;
   /** Present on full hosts; absent on reduced (TUI-embedded) hosts. */
-  agent?: { transform?: unknown; reload?: unknown };
+  agent?: {
+    transform?: unknown;
+    reload?: unknown;
+    /** Agent listing face (engine plugin host) — used by the spawn precheck. */
+    list?: (input?: unknown) => Promise<unknown>;
+  };
   session?: {
     hook(
       event:
@@ -137,7 +142,15 @@ export interface V2Ctx {
         | "retry",
       handler: (event: any) => unknown,
     ): Promise<V2Registration>;
-    create?(args: { directory?: string; title?: string; parentID?: string }): Promise<unknown>;
+    create?(args: {
+      directory?: string;
+      title?: string;
+      parentID?: string;
+      /** Session-level agent: v2 prompt payloads have no agent field. */
+      agent?: string;
+      /** v2 Model.Ref shape: { providerID, id, variant? }. */
+      model?: { providerID: string; id: string; variant?: string };
+    }): Promise<unknown>;
     prompt?(args: { sessionID: string; text?: string; agent?: string }): Promise<unknown>;
     /** In-process message read face; the replacement for v1 `session.messages`. */
     context?(args: { sessionID: string }): Promise<unknown>;

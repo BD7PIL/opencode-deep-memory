@@ -8,11 +8,12 @@ import { createMemoryExpandTool } from "./memory-expand.js";
 import { createContextCompressTool } from "./context-compress.js";
 import { createMemoryTopicTool } from "./memory-topic.js";
 import { ccrRetrieve } from "../compress/ccr.js";
+import type { ConsolidationConfig } from "../shared/consolidation-config.js";
 
 export function createMemoryTools(
   service: SearchService,
   state: PluginState,
-  opts?: { projectPath?: string; client?: unknown },
+  opts?: { projectPath?: string; client?: unknown; consolidation?: ConsolidationConfig },
 ) {
   const search = createMemorySearchTool(service);
   const store = createMemoryStoreTool(service, state);
@@ -20,7 +21,12 @@ export function createMemoryTools(
   const expand = opts?.projectPath
     ? createMemoryExpandTool({ projectPath: opts.projectPath })
     : createMemoryExpandTool({ projectPath: "" });
-  const compress = createContextCompressTool(state, opts?.client, opts?.projectPath ?? "");
+  const compress = createContextCompressTool(
+    state,
+    opts?.client,
+    opts?.projectPath ?? "",
+    opts?.consolidation ?? { enabled: true, agent: "general", maxFailures: 3, pendingTimeoutMs: 15 * 60_000 },
+  );
   const topic = createMemoryTopicTool(opts?.projectPath ?? "");
 
   return {

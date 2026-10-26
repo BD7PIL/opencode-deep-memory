@@ -1,6 +1,46 @@
-# Unreleased
+# 0.16.6 — consolidation can no longer loop forever
 
-- Add a documentation link gate (`npm run check:links`): relative links must
+## Fixed
+
+- **Idle/compaction consolidation can no longer loop forever.** Every failure
+  exit (LLM error, validation reject, spawn throw, missing session id, pending
+  timeout) now records a failure; after `maxFailures` consecutive failures
+  (default 3) consolidation is disabled until process restart, with one log +
+  toast on the first give-up. Success resets the budget. The compaction path
+  also resets the trigger counters on success — it previously never did, which
+  kept `shouldConsolidate()` permanently true after an applied consolidation.
+  (Incident: 9 doomed consolidation sub-sessions in 40 minutes on a v2 host.)
+- **Sub-sessions run the intended agent and model on v2 engines.** v2 prompt
+  payloads have no `agent`/`model` fields — the old prompt-body fields were
+  silently dropped and the host's default-agent chain picked the persona
+  instead (observed as consolidation running as an orchestrator agent). The
+  agent and model now ride `session.create`, which every engine accepts; the
+  v2 client adapter forwards both, with the model mapped to the v2
+  `{providerID, id}` shape.
+- **Pending results are no longer lost on the first idle tick.** A spawned
+  sub-session is re-polled until it produces a terminal assistant message;
+  pending entries older than `pendingTimeoutMs` (default 15 min) are consumed
+  and counted as a failure instead of being silently dropped.
+
+## Added
+
+- **Agent precheck before every spawn**: if the configured agent does not exist
+  on the host, consolidation is skipped with a single warning instead of
+  running the wrong persona. The probe never blocks on uncertainty (no list
+  face, unrecognized payload, probe error → spawn proceeds as before).
+- **The plugin's first config surface** — v1 hosts via the plugin options
+  tuple: `plugin: ["@bd7pil/opencode-deep-memory", { consolidation: { enabled,
+  agent, maxFailures, pendingTimeoutMs } }]`; everywhere (including v2 hosts)
+  via `DEEP_MEMORY_CONSOLIDATION`, `DEEP_MEMORY_CONSOLIDATION_AGENT`,
+  `DEEP_MEMORY_CONSOLIDATION_MAX_FAILURES`,
+  `DEEP_MEMORY_CONSOLIDATION_PENDING_TIMEOUT_MS`. Numbers are clamped to sane
+  ranges; defaults: enabled, `"general"`, 3, 15 min.
+- Regression suite `tests/hooks/consolidation-guard.test.ts` (15 tests) that
+  replays the incident end to end through the plugin entry: missing agent →
+  no spawn, three LLM errors → give-up until restart, unfinished sub-session →
+  pending kept and re-polled then timed out, `session.create` carries
+  agent+model, success applies with a `.bak` backup.
+- Documentation link gate (`npm run check:links`): relative links must
   resolve, and same-repo GitHub blob/tree links must point at an existing path.
   It runs in CI and as the first step of `npm run verify`.
 

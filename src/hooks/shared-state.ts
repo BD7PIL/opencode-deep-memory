@@ -117,7 +117,10 @@ export class PluginState {
   private _greetedSessions = new Set<string>();
   private _nudgedSessions = new Map<string, Set<string>>();
   private _pendingPostCompactNudges = new Set<string>();
-  private _pendingConsolidation: Record<string, { subSessionID: string; memMtime: number }> = {};
+  private _pendingConsolidation: Record<
+    string,
+    { subSessionID: string; memMtime: number; setAt: number }
+  > = {};
   /**
    * IDs of sub-sessions this plugin spawned (consolidation / compression).
    * Used to short-circuit hooks that must not run on our own spawned sub-sessions,
@@ -130,6 +133,16 @@ export class PluginState {
   private _lastConsolidationMemLines = 0;
   private _lastConsolidationAttempt = 0;
   private static readonly CONSOLIDATION_COOLDOWN_MS = 60_000;
+  /**
+   * Consecutive failed consolidations (LLM error, validation reject, spawn
+   * throw, pending timeout). Every non-success terminal outcome counts;
+   * recordConsolidationDone resets. Callers gate spawns on the configured max.
+   * Without this, a host where consolidation can never succeed respawns every
+   * cooldown expiry, forever (2026-10-26 EL7: 9 doomed sub-sessions in 40min).
+   */
+  private _consolidationFailures = 0;
+  private _consolidationGaveUpLogged = false;
+  private _consolidationAgentMissingLogged = false;
   private _lastProactiveCheck = 0;
   private static readonly PROACTIVE_THROTTLE_MS = 3_000;
   agentOf(sessionID: string): string | undefined {
@@ -454,6 +467,8 @@ export class PluginState {
   recordConsolidationDone(currentMemLines: number): void {
     this._memoryStoreSinceConsolidation = 0;
     this._lastConsolidationMemLines = currentMemLines;
+    this._consolidationFailures = 0;
+    this._consolidationGaveUpLogged = false;
   }
 
   /** DCP #439 pattern: prevent rapid re-consolidation attempts. */
@@ -495,14 +510,44 @@ export class PluginState {
 
   /** P0: set pending consolidation sub-session. */
   setPendingConsolidation(sessionID: string, info: { subSessionID: string; memMtime: number }): void {
-    this._pendingConsolidation[sessionID] = info;
+    this._pendingConsolidation[sessionID] = { ...info, setAt: Date.now() };
+  }
+
+  /** Non-destructive read — used to re-poll a still-running sub-session. */
+  peekPendingConsolidation(
+    sessionID: string,
+  ): { subSessionID: string; memMtime: number; setAt: number } | undefined {
+    return this._pendingConsolidation[sessionID];
   }
 
   /** P0: consume pending consolidation (destructive read). */
-  consumePendingConsolidation(sessionID: string): { subSessionID: string; memMtime: number } | undefined {
+  consumePendingConsolidation(
+    sessionID: string,
+  ): { subSessionID: string; memMtime: number; setAt: number } | undefined {
     const info = this._pendingConsolidation[sessionID];
     delete this._pendingConsolidation[sessionID];
     return info;
+  }
+
+  recordConsolidationFailure(): number {
+    return ++this._consolidationFailures;
+  }
+
+  consolidationFailures(): number {
+    return this._consolidationFailures;
+  }
+
+  /** First-call-wins logger gate: true exactly once per process per condition. */
+  markConsolidationGaveUpLogged(): boolean {
+    const first = !this._consolidationGaveUpLogged;
+    this._consolidationGaveUpLogged = true;
+    return first;
+  }
+
+  markConsolidationAgentMissingLogged(): boolean {
+    const first = !this._consolidationAgentMissingLogged;
+    this._consolidationAgentMissingLogged = true;
+    return first;
   }
 
   /**
@@ -516,7 +561,12 @@ export class PluginState {
   persistPendingConsolidation(projectDir: string): void {
     const filePath = path.join(projectDir, ".pending-consolidation.json");
     const entries = Object.entries(this._pendingConsolidation).map(
-      ([sid, info]) => ({ sessionID: sid, subSessionID: info.subSessionID, memMtime: info.memMtime }),
+      ([sid, info]) => ({
+        sessionID: sid,
+        subSessionID: info.subSessionID,
+        memMtime: info.memMtime,
+        setAt: info.setAt,
+      }),
     );
     if (entries.length === 0) {
       try { fs.unlinkSync(filePath); } catch {}
@@ -539,21 +589,21 @@ export class PluginState {
     try {
       const raw = fs.readFileSync(filePath, "utf8");
       const parsed = JSON.parse(raw) as
-        | { version?: number; entries?: Array<{ sessionID: string; subSessionID: string; memMtime: number }> }
+        | { version?: number; entries?: Array<{ sessionID: string; subSessionID: string; memMtime: number; setAt?: number }> }
         | { sessionID?: string; subSessionID?: string; memMtime?: number };
-      let entries: Array<{ sessionID: string; subSessionID: string; memMtime: number }>;
+      let entries: Array<{ sessionID: string; subSessionID: string; memMtime: number; setAt: number }>;
       if ("entries" in parsed && Array.isArray(parsed.entries)) {
-        entries = parsed.entries;
+        entries = parsed.entries.map((e) => ({ ...e, setAt: e.setAt ?? Date.now() }));
       } else if ("sessionID" in parsed && parsed.sessionID && parsed.subSessionID) {
         // Legacy single-entry format — backward compat for older plugin versions.
-        entries = [{ sessionID: parsed.sessionID, subSessionID: parsed.subSessionID, memMtime: parsed.memMtime ?? 0 }];
+        entries = [{ sessionID: parsed.sessionID, subSessionID: parsed.subSessionID, memMtime: parsed.memMtime ?? 0, setAt: Date.now() }];
       } else {
         return false;
       }
       if (entries.length === 0) return false;
       for (const e of entries) {
         if (e.sessionID && e.subSessionID) {
-          this._pendingConsolidation[e.sessionID] = { subSessionID: e.subSessionID, memMtime: e.memMtime };
+          this._pendingConsolidation[e.sessionID] = { subSessionID: e.subSessionID, memMtime: e.memMtime, setAt: e.setAt };
           // Re-populate guard Set so post-restart idle events from these
           // sub-sessions don't cascade.
           this._spawnedSubSessionIDs.add(e.subSessionID);
