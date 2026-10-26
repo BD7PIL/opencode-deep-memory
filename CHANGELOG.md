@@ -1,3 +1,21 @@
+# 0.16.11 — reasoning stripping can no longer orphan tool results
+
+## Fixed
+
+- **Stripping reasoning no longer orphans tool results on the wire.** The
+  transform removed reasoning parts from old assistant messages; when such a
+  message's only remaining text was whitespace (the model answered with
+  reasoning + a tool call and no prose), the message arrived at the provider
+  as [whitespace text + tool part] — and the engine's wire conversion drops
+  assistant messages with empty text while still emitting their tool results.
+  Result: a `tool` message with no preceding `tool_calls`, which strict
+  providers (DeepSeek) reject for the whole request —
+  `Messages with role 'tool' must be a response to a preceding message with
+  'tool_calls'` — while lenient providers accept it, which is why the failure
+  looked model-specific. The transform now keeps the reasoning part when
+  stripping would leave a tool-bearing message without substantive content
+  (messages without tool parts strip as before).
+
 # 0.16.10 — one spawn per idle, even when the host delivers it twice
 
 ## Fixed
