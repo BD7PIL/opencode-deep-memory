@@ -165,6 +165,30 @@ describe("probeAgent", () => {
 });
 
 describe("idle consolidation guards (through the plugin entry)", () => {
+  it("memoizes per project directory: two projects never share one hooks instance", async () => {
+    await withTempProject(async (projectA) => {
+      await withTempProject(async (projectB) => {
+        delete (globalThis as Record<string, unknown>)["__deepMemoryCachedHooks"];
+        const build = (directory: string) =>
+          deepMemoryPlugin({
+            directory,
+            serverUrl: new URL("http://localhost:0"),
+            client: clientWithAgents(["general"]),
+          } as never) as Promise<unknown>;
+
+        const a1 = await build(projectA);
+        const b1 = await build(projectB);
+        const a2 = await build(projectA);
+        // Same directory → same instance (host may load the module twice)…
+        expect(a2).toBe(a1);
+        // …but a different location must get its own projectPath/state/client,
+        // otherwise consolidation runs against the wrong project's MEMORY.md.
+        expect(b1).not.toBe(a1);
+        delete (globalThis as Record<string, unknown>)["__deepMemoryCachedHooks"];
+      });
+    });
+  });
+
   it("disabled via config: never spawns", async () => {
     await withTempProject(async (project) => {
       writeMemory(project, 25);

@@ -41,15 +41,32 @@ import {
 } from "./shared/consolidation-config.js";
 import { probeAgent } from "./shared/agent-probe.js";
 
+/**
+ * Hooks memo, keyed by project directory.
+ *
+ * v2 hosts instantiate plugins PER LOCATION. A single shared hooks object meant
+ * only the first location's projectPath/state/client were ever used: every
+ * other project consolidated the WRONG project's MEMORY.md, and an idle in any
+ * project could trigger it. The memo keeps one entry per directory (stored in
+ * one global Map so a `delete globalThis["__deepMemoryCachedHooks"]` still
+ * invalidates everything); v1 hosts (one call, one directory) are unaffected.
+ */
+export const HOOKS_CACHE_KEY = "__deepMemoryCachedHooks";
+
 export const deepMemoryPlugin: Plugin = async (input: PluginInput, options?: unknown): Promise<Hooks> => {
-  const cached = (globalThis as Record<string, unknown>)["__deepMemoryCachedHooks"] as Hooks | undefined;
+  const projectPath = input.directory;
+  let memo = (globalThis as Record<string, unknown>)[HOOKS_CACHE_KEY] as Map<string, Hooks> | undefined;
+  if (!(memo instanceof Map)) {
+    memo = new Map<string, Hooks>();
+    (globalThis as Record<string, unknown>)[HOOKS_CACHE_KEY] = memo;
+  }
+  const cached = memo.get(projectPath);
   if (cached) return cached;
 
   const logger = createLogger();
   const state = createPluginState();
   const consolidation = resolveConsolidationConfig(options as ConsolidationOptions | undefined);
 
-  const projectPath = input.directory;
   const dataRoot = resolveDataRoot();
 
   logger.info("opencode-deep-memory starting", {
@@ -247,7 +264,7 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput, options?: unk
     ),
   };
 
-  (globalThis as Record<string, unknown>)["__deepMemoryCachedHooks"] = hooks;
+  memo.set(projectPath, hooks);
   return hooks;
 };
 

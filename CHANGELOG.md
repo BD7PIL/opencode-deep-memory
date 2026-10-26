@@ -1,3 +1,18 @@
+# 0.16.7 — consolidation targets the right project
+
+## Fixed
+
+- **The plugin is memoized per project directory, not once per process.** v2
+  hosts instantiate plugins per location, but the hooks were cached under a
+  single global key: every location after the first reused the first
+  location's `projectPath`, `PluginState` and client. The visible damage was
+  consolidation operating on the **first project's** `MEMORY.md` (a session in
+  one project could consolidate, or fail to consolidate, another project's
+  memory — observed on a host where 9 consolidation runs processed a different
+  project's memory while every related session lived elsewhere), and per-project
+  counters being shared. The memo now holds one entry per directory; v1 hosts
+  (single location) are unaffected.
+
 # 0.16.6 — consolidation can no longer loop forever
 
 ## Fixed
