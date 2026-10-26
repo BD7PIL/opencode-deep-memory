@@ -1,3 +1,16 @@
+# 0.16.9 — one instance per project, even when the host races itself
+
+## Fixed
+
+- **Concurrent setups for the same directory no longer create two live
+  instances.** Building the hooks is async, so the directory memo (0.16.7)
+  only helped once the first build had finished; two setups racing for the
+  same location each built their own instance, each subscribed to events, and
+  every idle then spawned TWO consolidation sub-sessions (observed live: two
+  "Memory Consolidation" children in the same second). The memo now stores the
+  in-flight promise, so the second caller waits for the first build instead of
+  starting another.
+
 # 0.16.8 — session events stay inside their own project
 
 ## Fixed

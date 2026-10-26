@@ -217,6 +217,26 @@ describe("idle consolidation guards (through the plugin entry)", () => {
     });
   });
 
+  it("concurrent setups for one project yield ONE instance (no duplicate subscriptions)", async () => {
+    await withTempProject(async (project) => {
+      delete (globalThis as Record<string, unknown>)["__deepMemoryCachedHooks"];
+      const build = () =>
+        deepMemoryPlugin({
+          directory: project,
+          serverUrl: new URL("http://localhost:0"),
+          client: clientWithAgents(["general"]),
+        } as never);
+      // Two hosts racing to set up the same location: building is async, so a
+      // finished-only memo would hand out two live instances → every idle would
+      // spawn two consolidations.
+      const [a, b] = await Promise.all([build(), build()]);
+      const c = await build();
+      expect(a).toBe(b);
+      expect(c).toBe(a);
+      delete (globalThis as Record<string, unknown>)["__deepMemoryCachedHooks"];
+    });
+  });
+
   it("disabled via config: never spawns", async () => {
     await withTempProject(async (project) => {
       writeMemory(project, 25);

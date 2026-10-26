@@ -47,21 +47,44 @@ import { probeAgent } from "./shared/agent-probe.js";
  * v2 hosts instantiate plugins PER LOCATION. A single shared hooks object meant
  * only the first location's projectPath/state/client were ever used: every
  * other project consolidated the WRONG project's MEMORY.md, and an idle in any
- * project could trigger it. The memo keeps one entry per directory (stored in
- * one global Map so a `delete globalThis["__deepMemoryCachedHooks"]` still
- * invalidates everything); v1 hosts (one call, one directory) are unaffected.
+ * project could trigger it.
+ *
+ * Entries hold the in-flight PROMISE, not just the finished hooks: building is
+ * async, so two concurrent setups for one directory would both miss a
+ * finished-only memo and produce TWO live instances — each with its own event
+ * subscription, i.e. two consolidation spawns per idle (observed: two
+ * sub-sessions in the same second). The promise placeholder closes that race.
+ * One global Map, so `delete globalThis["__deepMemoryCachedHooks"]` still
+ * invalidates everything; v1 hosts (one call, one directory) are unaffected.
  */
 export const HOOKS_CACHE_KEY = "__deepMemoryCachedHooks";
 
 export const deepMemoryPlugin: Plugin = async (input: PluginInput, options?: unknown): Promise<Hooks> => {
   const projectPath = input.directory;
-  let memo = (globalThis as Record<string, unknown>)[HOOKS_CACHE_KEY] as Map<string, Hooks> | undefined;
+  let memo = (globalThis as Record<string, unknown>)[HOOKS_CACHE_KEY] as
+    | Map<string, Hooks | Promise<Hooks>>
+    | undefined;
   if (!(memo instanceof Map)) {
-    memo = new Map<string, Hooks>();
+    memo = new Map<string, Hooks | Promise<Hooks>>();
     (globalThis as Record<string, unknown>)[HOOKS_CACHE_KEY] = memo;
   }
-  const cached = memo.get(projectPath);
-  if (cached) return cached;
+  const existing = memo.get(projectPath);
+  if (existing) return existing;
+
+  const building = buildHooks(input, options);
+  memo.set(projectPath, building);
+  try {
+    const hooks = await building;
+    memo.set(projectPath, hooks);
+    return hooks;
+  } catch (err) {
+    memo.delete(projectPath);
+    throw err;
+  }
+};
+
+async function buildHooks(input: PluginInput, options?: unknown): Promise<Hooks> {
+  const projectPath = input.directory;
 
   const logger = createLogger();
   const state = createPluginState();
@@ -274,9 +297,8 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput, options?: unk
     ),
   };
 
-  memo.set(projectPath, hooks);
   return hooks;
-};
+}
 
 type IdleClient = {
   session: {
