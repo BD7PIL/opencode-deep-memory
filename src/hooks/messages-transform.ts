@@ -128,6 +128,16 @@ export function createMessagesTransformHandler(
 
         // O15: Reasoning/thinking parts — strip metadata, then REMOVE entirely
         // (not replaced with "[cleared]" — that causes context confusion)
+        //
+        // PAIRING GUARD (0.16.11): if removing the reasoning would leave this
+        // assistant message with only whitespace text + tool parts, KEEP the
+        // reasoning. The engine's wire conversion drops assistant messages
+        // whose text is empty/whitespace, but their tool parts still become
+        // tool-result messages — orphaned `tool` messages with no preceding
+        // `tool_calls` (observed live: DeepSeek rejects the whole request with
+        // "Messages with role 'tool' must be a response to a preceding message
+        // with 'tool_calls'" while lenient providers accept it). The reasoning
+        // part is what keeps such messages alive on the wire.
         if (partType === "reasoning" || partType === "thinking" || partType === "redacted_thinking") {
           const meta = p["metadata"] as Record<string, unknown> | undefined;
           if (meta) {
@@ -137,6 +147,19 @@ export function createMessagesTransformHandler(
               stats.metadata_stripped++;
             }
           }
+          const hasToolParts = msg.parts.some(
+            (q) => q !== p && typeof q === "object" && q !== null && (q as Record<string, unknown>)["type"] === "tool",
+          );
+          const remainingSubstantive = hasToolParts
+            ? msg.parts.some((q) => {
+              if (typeof q !== "object" || q === null || q === p) return false;
+              const qp = q as Record<string, unknown>;
+              if (qp["type"] === "text") return typeof qp["text"] === "string" && qp["text"].trim() !== "";
+              if (qp["type"] === "tool") return false;
+              return !METADATA_PART_TYPES.has(String(qp["type"]));
+            })
+            : true;
+          if (!remainingSubstantive) continue;
           msg.parts.splice(j, 1);
           stats.reasoning_cleared++;
           continue;
