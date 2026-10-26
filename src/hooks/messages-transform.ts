@@ -89,6 +89,33 @@ export function createMessagesTransformHandler(
   return async (input, output) => {
     const messages = output.messages;
 
+    // PAIRING PIN (0.16.12): an assistant message carrying tool parts whose
+    // text is whitespace-only gets dropped by the engine's wire conversion
+    // (empty-text assistants vanish) while its tool results still emit — an
+    // orphaned `tool` message with no preceding `tool_calls`. DeepSeek rejects
+    // the whole request; lenient providers accept it, so the failure looked
+    // model-specific. Pin runs FIRST, over ALL messages (the 2026-10-27
+    // capture showed the orphan sitting inside the protected-head region,
+    // created by the engine's own compaction boundary), and is idempotent.
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      if (!msg?.parts?.length) continue;
+      if (msg.info.role !== "assistant") continue;
+      const hasTool = msg.parts.some((q) => typeof q === "object" && q !== null && (q as Record<string, unknown>)["type"] === "tool");
+      if (!hasTool) continue;
+      const substantive = msg.parts.some((q) => {
+        if (typeof q !== "object" || q === null) return false;
+        const qp = q as Record<string, unknown>;
+        if (qp["type"] === "text") return typeof qp["text"] === "string" && qp["text"].trim() !== "";
+        if (qp["type"] === "tool") return false;
+        return !METADATA_PART_TYPES.has(String(qp["type"]));
+      });
+      if (substantive) continue;
+      const textPart = msg.parts.find((q) => typeof q === "object" && q !== null && (q as Record<string, unknown>)["type"] === "text") as Record<string, unknown> | undefined;
+      if (textPart) textPart["text"] = "(tool call)";
+      else msg.parts.push({ type: "text", text: "(tool call)" } as never);
+    }
+
     // G9 (Headroom): proactive expansion — auto-restore compressed content
     // that matches the user's latest query, before any compression runs.
     await maybeProactiveExpand(state, messages as never);
@@ -206,32 +233,6 @@ export function createMessagesTransformHandler(
     // Apply deferred message removals (reverse order — safe splice)
     for (let r = toRemove.length - 1; r >= 0; r--) {
       messages.splice(toRemove[r], 1);
-    }
-
-    // PAIRING PIN (0.16.11): an assistant message with tool parts whose text is
-    // whitespace-only can be dropped by the engine's wire conversion (empty text)
-    // while its tool results still emit — an orphaned `tool` message with no
-    // preceding `tool_calls` (DeepSeek rejects the whole request; lenient
-    // providers accept it, so the failure looked model-specific). Pin such
-    // messages to the wire with minimal non-whitespace text, regardless of what
-    // else the transform did to them.
-    for (let i = PROTECTED_HEAD; i < messages.length; i++) {
-      const msg = messages[i];
-      if (!msg?.parts?.length) continue;
-      if (msg.info.role !== "assistant") continue;
-      const hasTool = msg.parts.some((q) => typeof q === "object" && q !== null && (q as Record<string, unknown>)["type"] === "tool");
-      if (!hasTool) continue;
-      const substantive = msg.parts.some((q) => {
-        if (typeof q !== "object" || q === null) return false;
-        const qp = q as Record<string, unknown>;
-        if (qp["type"] === "text") return typeof qp["text"] === "string" && qp["text"].trim() !== "";
-        if (qp["type"] === "tool") return false;
-        return !METADATA_PART_TYPES.has(String(qp["type"]));
-      });
-      if (substantive) continue;
-      const textPart = msg.parts.find((q) => typeof q === "object" && q !== null && (q as Record<string, unknown>)["type"] === "text") as Record<string, unknown> | undefined;
-      if (textPart) textPart["text"] = "(tool call)";
-      else msg.parts.push({ type: "text", text: "(tool call)" } as never);
     }
 
     if (Object.values(stats).some(v => v > 0)) {

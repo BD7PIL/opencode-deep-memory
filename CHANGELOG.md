@@ -6,6 +6,20 @@
   0.16.11 reasoning guard covered one trigger (reasoning stripping); this
   release makes the invariant unconditional: any assistant message with tool
   parts but only whitespace text gets a minimal non-whitespace text part
+  ("(tool call)") appended — first thing in the transform, over ALL
+  messages including the protected head and short conversations. The live
+  orphan sat exactly there: inside the protected head, created by the
+  engine's own compaction boundary (14:18), which is why 0.16.11's
+  mid-zone-only pin did not clear it.
+
+# 0.16.12 — tool-bearing assistants are pinned to the wire
+
+## Fixed
+
+- **Assistants carrying tool parts can no longer fall off the wire.** The
+  0.16.11 reasoning guard covered one trigger (reasoning stripping); this
+  release makes the invariant unconditional: any assistant message with tool
+  parts but only whitespace text gets a minimal non-whitespace text part
   ("(tool call)") appended, so the engine's wire conversion can never drop
   the message while its tool results still emit. Verified live on EL7 after
   both fixes: a DeepSeek turn on the previously-poisoned session still failed
