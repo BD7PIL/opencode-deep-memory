@@ -57,6 +57,15 @@ function isOrphanShape(m: Wrap): boolean {
 }
 
 describe("messages.transform wire-pairing guard", () => {
+  it("pins whitespace-text tool messages to the wire even with no reasoning part", async () => {
+    const out = await transform(
+      build({ info: { role: "assistant" }, parts: [{ type: "text", text: WS_TEXT }, toolPart("call-3", "file listing")] }),
+    );
+    const msg = out.find((m) => m.parts.some((p) => p.type === "tool" && p.callID === "call-3"));
+    expect(msg?.parts.some((p) => p.type === "text" && String(p.text).trim() !== "")).toBe(true);
+    expect(out.filter(isOrphanShape)).toEqual([]);
+  });
+
   it("never leaves [whitespace text + tool] assistants without reasoning (the orphan shape)", async () => {
     const out = await transform(
       build({

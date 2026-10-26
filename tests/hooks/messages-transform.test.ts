@@ -194,7 +194,8 @@ describe("createMessagesTransformHandler", () => {
     const output = makeOutput(msgs);
     await handler({} as never, output as never);
     const parts = output.messages[targetIdx].parts as Record<string, unknown>[];
-    const toolState = parts[0]["state"] as Record<string, unknown>;
+    const toolPart = parts.find((p) => p["type"] === "tool") as Record<string, unknown>;
+    const toolState = toolPart["state"] as Record<string, unknown>;
     expect(toolState["error"]).toBe("x".repeat(100) + "... [truncated]");
     expect(logger.debug).toHaveBeenCalledWith(
       "messages.transform: stripped",
@@ -297,7 +298,8 @@ describe("createMessagesTransformHandler", () => {
     const output = makeOutput(msgs);
     await handler({} as never, output as never);
     const parts = output.messages[targetIdx].parts as Record<string, unknown>[];
-    const toolState = parts[0]["state"] as Record<string, unknown>;
+    const toolPart = parts.find((p) => p["type"] === "tool") as Record<string, unknown>;
+    const toolState = toolPart["state"] as Record<string, unknown>;
     expect(toolState["error"]).toBe("short error");
     expect(logger.debug).not.toHaveBeenCalledWith(
       expect.stringContaining("stripped"),
