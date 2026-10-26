@@ -1,4 +1,4 @@
-# 0.16.12 — tool-bearing assistants are pinned to the wire
+# 0.16.13 — tool-bearing assistants are pinned to the wire
 
 ## Fixed
 
@@ -12,7 +12,7 @@
   engine's own compaction boundary (14:18), which is why 0.16.11's
   mid-zone-only pin did not clear it.
 
-# 0.16.12 — tool-bearing assistants are pinned to the wire
+# 0.16.13 — tool-bearing assistants are pinned to the wire
 
 ## Fixed
 
