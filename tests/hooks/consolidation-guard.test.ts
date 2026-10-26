@@ -237,6 +237,24 @@ describe("idle consolidation guards (through the plugin entry)", () => {
     });
   });
 
+  it("duplicate delivery of ONE idle spawns only once", async () => {
+    await withTempProject(async (project) => {
+      writeMemory(project, 25);
+      // Slow probe so both invocations would pass the cooldown check under the
+      // old check-then-act order.
+      const client = mockHostClient({ messages: [] }) as Record<string, unknown>;
+      (client as { agent: Record<string, unknown> }).agent = {
+        list: vi.fn().mockImplementation(async () => {
+          await new Promise((r) => setTimeout(r, 20));
+          return { data: [{ id: "general" }] };
+        }),
+      };
+      const hooks = await buildPlugin(project, client);
+      await Promise.all([idle(hooks, "ses-dup"), idle(hooks, "ses-dup")]);
+      expect((client as { session: { create: ReturnType<typeof vi.fn> } }).session.create).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("disabled via config: never spawns", async () => {
     await withTempProject(async (project) => {
       writeMemory(project, 25);
@@ -256,7 +274,9 @@ describe("idle consolidation guards (through the plugin entry)", () => {
       await idle(hooks);
       const c = (client as { session: { create: ReturnType<typeof vi.fn> } }).session.create;
       expect(c).not.toHaveBeenCalled();
-      expect((client as { agent: { list: ReturnType<typeof vi.fn> } }).agent.list).toHaveBeenCalledTimes(2);
+      // The attempt is recorded before the (async) probe, so the immediate
+      // repeat idles out on the cooldown instead of re-probing every tick.
+      expect((client as { agent: { list: ReturnType<typeof vi.fn> } }).agent.list).toHaveBeenCalledTimes(1);
     });
   });
 

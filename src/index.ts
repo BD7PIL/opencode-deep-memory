@@ -522,9 +522,22 @@ async function handleIdleConsolidation(
 
   if (!state.shouldConsolidate(memLines)) return;
 
-  // DCP #439 cooldown: prevent rapid re-consolidation attempts
+  // DCP #439 cooldown: prevent rapid re-consolidation attempts.
+  //
+  // The attempt is recorded HERE, before the first await: the host can deliver
+  // the same idle twice (two subscriptions for one location), and the old
+  // order — check cooldown → await agent probe → record — let both invocations
+  // pass the check and spawn a sub-session each.
   if (!state.canStartConsolidation()) {
     logger.info("idle consolidation: cooldown active, skipping");
+    return;
+  }
+  state.recordConsolidationAttempt();
+
+  // One consolidation in flight per project: another parent session idling in
+  // this project must not start a second one.
+  if (state.hasPendingConsolidation()) {
+    logger.info("idle consolidation: another consolidation is in flight, skipping");
     return;
   }
 
@@ -541,7 +554,6 @@ async function handleIdleConsolidation(
     }
     return;
   }
-  state.recordConsolidationAttempt();
 
   try {
     const model = state.bestModel();

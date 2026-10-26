@@ -1,3 +1,15 @@
+# 0.16.10 — one spawn per idle, even when the host delivers it twice
+
+## Fixed
+
+- **Duplicate delivery of one idle can no longer spawn two consolidations.**
+  The cooldown check ran before the `await`-ed agent probe and the attempt was
+  recorded after it, so two invocations of the same idle both passed the check
+  and each spawned a sub-session (observed live: two children in the same
+  second). The attempt is now recorded immediately after the check, and a
+  project-level guard also refuses to start a consolidation while another one
+  is still awaiting its result.
+
 # 0.16.9 — one instance per project, even when the host races itself
 
 ## Fixed

@@ -520,6 +520,11 @@ export class PluginState {
     return this._pendingConsolidation[sessionID];
   }
 
+  /** True while any consolidation (from any parent) is still awaiting its result. */
+  hasPendingConsolidation(): boolean {
+    return Object.keys(this._pendingConsolidation).length > 0;
+  }
+
   /** P0: consume pending consolidation (destructive read). */
   consumePendingConsolidation(
     sessionID: string,
