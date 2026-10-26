@@ -47,17 +47,21 @@ export function normalizeV2Event(event: V2Event): V1EventShape | undefined {
   const data = (event.data ?? {}) as Record<string, unknown>;
   const rawSessionID = data["sessionID"];
   const sessionID = typeof rawSessionID === "string" ? rawSessionID : undefined;
+  // v2 events are broadcast to every plugin instance with the owning location
+  // attached. The v1 handler needs it to stay out of other projects' sessions.
+  const locationDirectory =
+    typeof event.location?.directory === "string" ? event.location.directory : undefined;
 
   switch (v1Type) {
     case "session.error":
-      return { type: v1Type, properties: { sessionID, error: data["error"] ?? event.data } };
+      return { type: v1Type, properties: { sessionID, locationDirectory, error: data["error"] ?? event.data } };
     case "session.deleted":
       // The v1 handler reads properties.info.id to forget the session's agent.
-      return { type: v1Type, properties: { sessionID, info: { id: sessionID } } };
+      return { type: v1Type, properties: { sessionID, locationDirectory, info: { id: sessionID } } };
     case "session.created":
-      return { type: v1Type, properties: { sessionID, info: event.data } };
+      return { type: v1Type, properties: { sessionID, locationDirectory, info: event.data } };
     default:
       // session.idle / session.compacted both read properties.sessionID.
-      return { type: v1Type, properties: { sessionID } };
+      return { type: v1Type, properties: { sessionID, locationDirectory } };
   }
 }

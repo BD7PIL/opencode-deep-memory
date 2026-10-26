@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "name": "opencode-deep-memory",
-  "version": "0.16.7",
+  "version": "0.16.8",
   "license": "MIT",
   "host": {
     "node": ">=20",

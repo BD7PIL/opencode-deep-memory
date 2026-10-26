@@ -1,3 +1,17 @@
+# 0.16.8 — session events stay inside their own project
+
+## Fixed
+
+- **Idle/compaction events from other projects are ignored.** v2 broadcasts
+  every session event to every plugin instance together with the owning
+  location; the plugin acted on `session.idle` regardless. With N projects that
+  have a `MEMORY.md`, ONE idle could spawn up to N consolidations — each one
+  processing a project nobody was working in (observed live: a session in
+  `/tmp/dm-verify` spawned a consolidation of an unrelated 22 KB project
+  memory). Events now carry `locationDirectory` and are skipped unless it
+  matches this instance's project. Events without a location (v1 hosts) keep
+  the previous behaviour.
+
 # 0.16.7 — consolidation targets the right project
 
 ## Fixed

@@ -50,8 +50,13 @@ async function buildPlugin(
   return hooks as unknown as EventHooks;
 }
 
-async function idle(hooks: EventHooks, sessionID = "ses-parent"): Promise<void> {
-  await hooks.event({ event: { type: "session.idle", properties: { sessionID } } });
+async function idle(hooks: EventHooks, sessionID = "ses-parent", locationDirectory?: string): Promise<void> {
+  await hooks.event({
+    event: {
+      type: "session.idle",
+      properties: { sessionID, ...(locationDirectory ? { locationDirectory } : {}) },
+    },
+  });
 }
 
 /** Client whose agent-list face knows only the ids given. */
@@ -186,6 +191,29 @@ describe("idle consolidation guards (through the plugin entry)", () => {
         expect(b1).not.toBe(a1);
         delete (globalThis as Record<string, unknown>)["__deepMemoryCachedHooks"];
       });
+    });
+  });
+
+  it("ignores idles that belong to another project's location (v2 broadcast)", async () => {
+    await withTempProject(async (project) => {
+      writeMemory(project, 25);
+      const client = clientWithAgents(["general"]);
+      const hooks = await buildPlugin(project, client);
+      // Foreign location: v2 broadcasts every session event to every instance,
+      // so this instance must not consolidate its own memory for someone else's turn.
+      await idle(hooks, "ses-foreign", "/tmp/some-other-project");
+      expect((client as { session: { create: ReturnType<typeof vi.fn> } }).session.create).not.toHaveBeenCalled();
+      // Own location still works.
+      await idle(hooks, "ses-own", project);
+      expect((client as { session: { create: ReturnType<typeof vi.fn> } }).session.create).toHaveBeenCalledTimes(1);
+    });
+    // No location at all (v1 hosts) keeps the legacy behaviour.
+    await withTempProject(async (project) => {
+      writeMemory(project, 25);
+      const client = clientWithAgents(["general"]);
+      const hooks = await buildPlugin(project, client);
+      await idle(hooks, "ses-legacy");
+      expect((client as { session: { create: ReturnType<typeof vi.fn> } }).session.create).toHaveBeenCalledTimes(1);
     });
   });
 

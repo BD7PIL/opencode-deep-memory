@@ -152,6 +152,16 @@ export const deepMemoryPlugin: Plugin = async (input: PluginInput, options?: unk
           return;
         }
 
+        // v2 broadcasts every session event to every plugin instance, with the
+        // owning location attached. Acting on a foreign location means spawning
+        // consolidation for THIS project while someone works in another one —
+        // with N projects that turns one idle into N consolidations. Events
+        // without a location (v1 hosts) keep the old behaviour.
+        const eventLocation = (event.properties as { locationDirectory?: string }).locationDirectory;
+        if (typeof eventLocation === "string" && eventLocation.length > 0 && eventLocation !== projectPath) {
+          return;
+        }
+
         if (event.type === "session.idle") {
           const idleSessionID = (event.properties as { sessionID?: string }).sessionID;
 
