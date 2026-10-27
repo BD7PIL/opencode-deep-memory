@@ -1,3 +1,16 @@
+# 0.16.14 — the pin no longer trusts reasoning parts to survive
+
+## Fixed
+
+- **The pairing pin now accounts for reasoning stripping.** The 0.16.13 pin
+  runs before the reasoning-stripper and counted reasoning parts as
+  substantive content — so a [reasoning + whitespace text + tool] assistant
+  was skipped by the pin, then reduced by the stripper to exactly the doomed
+  [whitespace text + tool] shape (live-observed again on EL7 after 0.16.13:
+  the same two orphaned tool results at the compaction boundary). The pin now
+  treats reasoning/thinking parts as non-substantive and fires before the
+  stripper removes them.
+
 # 0.16.13 — tool-bearing assistants are pinned to the wire
 
 ## Fixed

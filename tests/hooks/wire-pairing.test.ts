@@ -76,7 +76,9 @@ describe("messages.transform wire-pairing guard", () => {
     const bad = out.filter(isOrphanShape);
     expect(bad).toEqual([]);
     const kept = out.find((m) => m.parts.some((p) => p.type === "tool" && p.callID === "call-1"));
-    expect(kept?.parts.some((p) => p.type === "reasoning")).toBe(true);
+    // wire-safe: the pinned "(tool call)" text keeps the message alive even
+    // though the reasoning part was stripped
+    expect(kept?.parts.some((p) => p.type === "text" && String(p.text).trim() !== "")).toBe(true);
   });
 
   it("still strips reasoning from messages with substantive text", async () => {

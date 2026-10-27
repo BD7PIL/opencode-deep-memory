@@ -108,6 +108,10 @@ export function createMessagesTransformHandler(
         const qp = q as Record<string, unknown>;
         if (qp["type"] === "text") return typeof qp["text"] === "string" && qp["text"].trim() !== "";
         if (qp["type"] === "tool") return false;
+        // reasoning parts are scheduled for removal by O15 — they must not
+        // count as substantive, or the pin skips a message that O15 will
+        // subsequently reduce to the doomed [whitespace text + tool] shape
+        if (qp["type"] === "reasoning" || qp["type"] === "thinking" || qp["type"] === "redacted_thinking") return false;
         return !METADATA_PART_TYPES.has(String(qp["type"]));
       });
       if (substantive) continue;
